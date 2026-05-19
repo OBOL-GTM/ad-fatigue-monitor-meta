@@ -635,6 +635,23 @@ async function discoverMqlProperty(): Promise<string | null> {
   return _cachedMqlPropName;
 }
 
+/**
+ * HubSpot's native "MQL distribution" report buckets by "Inbound Lead - Monthly"
+ * on the X-axis — that's the date the company became a lifecycle = lead in
+ * HubSpot's flow, stored on `hs_lifecyclestage_lead_date`. createdate is when
+ * the company record was *created* in HubSpot, which can be much earlier
+ * (e.g., the company was added but didn't become an inbound lead until later).
+ *
+ * Query BOTH date candidates in parallel and union by company id, so we match
+ * the chart whether the portal uses the built-in lead-date property or
+ * createdate. Dates returned are the lead-date if present, falling back to
+ * createdate.
+ */
+const INBOUND_DATE_CANDIDATES = [
+  "hs_lifecyclestage_lead_date",
+  "createdate",
+];
+
 async function _fetchLiteMQL(fromDate: string, toDate: string): Promise<{
   mqlYesDates: string[];
   totalInbounds: number;
@@ -642,37 +659,60 @@ async function _fetchLiteMQL(fromDate: string, toDate: string): Promise<{
   const mqlProp = await discoverMqlProperty();
   const fromTs = new Date(fromDate + "T00:00:00Z").getTime();
   const toTs = new Date(toDate + "T23:59:59Z").getTime();
-  const baseFilters = [
-    { propertyName: "createdate", operator: "GTE", value: String(fromTs) },
-    { propertyName: "createdate", operator: "LTE", value: String(toTs) },
-    { propertyName: COMPANY_LEAD_SOURCE_PROP, operator: "EQ", value: "Inbound" },
-    { propertyName: COMPANY_TIER_PROP, operator: "IN", values: COMPANY_TIER_ALLOWLIST },
-  ];
+
+  // Dedup by HubSpot company id. Prefer the lead-date when bucketing because
+  // that's what the native chart's X-axis ("Inbound Lead - Monthly") uses.
+  const seen = new Map<string, { dateStr: string; mql: boolean; src: string }>();
+
+  await Promise.all(INBOUND_DATE_CANDIDATES.map(async (dateProp) => {
+    const baseFilters = [
+      { propertyName: dateProp, operator: "GTE", value: String(fromTs) },
+      { propertyName: dateProp, operator: "LTE", value: String(toTs) },
+      { propertyName: COMPANY_LEAD_SOURCE_PROP, operator: "EQ", value: "Inbound" },
+      { propertyName: COMPANY_TIER_PROP, operator: "IN", values: COMPANY_TIER_ALLOWLIST },
+    ];
+    const properties = ["createdate", "hs_lifecyclestage_lead_date"];
+    if (mqlProp) properties.push(mqlProp);
+    let after: string | undefined;
+    try {
+      do {
+        const r = await hubspotFetch("/crm/v3/objects/companies/search", {
+          method: "POST",
+          body: JSON.stringify({
+            filterGroups: [{ filters: baseFilters }],
+            properties,
+            limit: 100,
+            ...(after ? { after } : {}),
+          }),
+        });
+        for (const c of (r.results || [])) {
+          const id = String(c.id);
+          // Prefer hs_lifecyclestage_lead_date for the date bucket; fall back to createdate.
+          const lead = parseCompanyDate(c.properties?.hs_lifecyclestage_lead_date);
+          const created = parseCompanyDate(c.properties?.createdate);
+          const dateStr = lead || created;
+          if (!dateStr) continue;
+          const v = mqlProp ? String(c.properties?.[mqlProp] ?? "").toLowerCase() : "";
+          const mql = v === "true" || v === "yes" || v === "1";
+          // First-seen wins for the dateStr; but if we later see the company
+          // via a different date filter, don't overwrite (the union of either
+          // date being in range is what matches the HubSpot chart).
+          if (!seen.has(id)) seen.set(id, { dateStr, mql, src: dateProp });
+        }
+        after = r.paging?.next?.after;
+      } while (after);
+    } catch (err) {
+      console.warn(`[hubspot-lite] MQL fetch by ${dateProp} failed (continuing):`, err);
+    }
+  }));
 
   const mqlYesDates: string[] = [];
   let totalInbounds = 0;
-  let after: string | undefined;
-  const properties = mqlProp ? ["createdate", mqlProp] : ["createdate"];
-  const body = {
-    filterGroups: [{ filters: baseFilters }],
-    properties,
-    limit: 100,
-  };
-  do {
-    const r = await hubspotFetch("/crm/v3/objects/companies/search", {
-      method: "POST",
-      body: JSON.stringify({ ...body, ...(after ? { after } : {}) }),
-    });
-    for (const c of (r.results || [])) {
-      totalInbounds++;
-      const d = parseCompanyDate(c.properties?.createdate);
-      if (!d) continue;
-      const v = mqlProp ? String(c.properties?.[mqlProp] ?? "").toLowerCase() : "";
-      if (v === "true" || v === "yes" || v === "1") mqlYesDates.push(d);
-    }
-    after = r.paging?.next?.after;
-  } while (after);
-
+  for (const { dateStr, mql } of seen.values()) {
+    totalInbounds++;
+    if (mql) mqlYesDates.push(dateStr);
+  }
+  console.log(`[hubspot-lite] MQL fetch ${fromDate}→${toDate}: ${totalInbounds} inbounds, ${mqlYesDates.length} MQL=Yes`);
   return { mqlYesDates, totalInbounds };
 }
 
