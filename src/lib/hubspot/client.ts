@@ -116,7 +116,7 @@ async function getApiKey(): Promise<string> {
 // Cap to 8 in-flight requests at a time. Excess requests queue and run as
 // slots free up. Negligible latency cost (queries take ~200ms each, so a
 // burst of 33 finishes in ~1s instead of ~200ms), enormous reliability gain.
-const MAX_CONCURRENT_HS = 8;
+const MAX_CONCURRENT_HS = 2;
 let _hsActive = 0;
 const _hsWaiting: Array<() => void> = [];
 
