@@ -106,68 +106,54 @@ async function getApiKey(): Promise<string> {
   throw new Error("HUBSPOT_API_KEY not configured");
 }
 
-// Concurrency limiter — HubSpot caps free-tier portals at 11 reqs/sec burst.
-// With month-sliced queries firing 9 MQL candidates + ATM + SQL per slice in
-// parallel, an 8-week window fires 33+ requests at once which intermittently
-// 429s the ATM/SQL legs (zeroing them out) and some MQL candidates (under-
-// counting). The retry logic below isn't enough on its own because all 429'd
-// requests retry simultaneously and trip the limit again.
+// Rate limiter — HubSpot caps standard portals at 10 req/sec sustained,
+// 11/sec burst. Previous concurrency-only semaphore (at 8 parallel) capped
+// the in-flight count but NOT the rate: queries finished in ~200ms, so the
+// effective rate was ~40/sec — 4x over the limit. SQL/ATM legs randomly
+// 429'd, retry logic compounded the burst, partial responses got cached
+// for 3 min, dashboard flapped between right and wrong every page load.
 //
-// Cap to 8 in-flight requests at a time. Excess requests queue and run as
-// slots free up. Negligible latency cost (queries take ~200ms each, so a
-// burst of 33 finishes in ~1s instead of ~200ms), enormous reliability gain.
-const MAX_CONCURRENT_HS = 8;
-let _hsActive = 0;
-const _hsWaiting: Array<() => void> = [];
+// Strict per-request gap: each call reserves a slot 110ms after the
+// previous one (~9 req/sec, safely under 10/sec). All HubSpot queries —
+// whether parallel slices, shotgun candidates, or pagination — serialize
+// through this one rate slot. For a 33-query WoW window, ~3.6 sec total
+// vs ~1 sec under semaphore-only, but deterministic and reliable.
+const HS_MIN_GAP_MS = 110;
+let _hsNextSlotTime = 0;
 
-function _acquireHsSlot(): Promise<void> {
-  if (_hsActive < MAX_CONCURRENT_HS) {
-    _hsActive++;
-    return Promise.resolve();
-  }
-  return new Promise<void>(resolve => {
-    _hsWaiting.push(() => {
-      _hsActive++;
-      resolve();
-    });
-  });
-}
-
-function _releaseHsSlot(): void {
-  _hsActive--;
-  const next = _hsWaiting.shift();
-  if (next) next();
+async function _waitForRateSlot(): Promise<void> {
+  const now = Date.now();
+  const slot = Math.max(now, _hsNextSlotTime);
+  _hsNextSlotTime = slot + HS_MIN_GAP_MS;
+  const wait = slot - now;
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
 }
 
 async function hubspotFetch(path: string, options?: RequestInit): Promise<any> {
-  await _acquireHsSlot();
-  try {
-    const apiKey = await getApiKey();
-    // Retry on 5xx + 429, HubSpot rate-limits bursts, and parallel slice
-    // queries easily trip that. Without retry, one 429 loses a whole month.
-    let lastErr: any = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const res = await fetch(`${BASE_URL}${path}`, {
-        ...options,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-          ...options?.headers,
-        },
-      });
-      if (res.ok) return res.json();
-      const body = await res.text();
-      if (res.status >= 500 || res.status === 429) {
-        lastErr = new Error(`HubSpot API error ${res.status}: ${body}`);
-        await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt)));
-        continue;
-      }
-      throw new Error(`HubSpot API error ${res.status}: ${body}`);
+  await _waitForRateSlot();
+  const apiKey = await getApiKey();
+  // Retry on 5xx + 429 as a safety net. With the rate limiter above, 429s
+  // should be rare (only triggered by other clients sharing this API key).
+  let lastErr: any = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        ...options?.headers,
+      },
+    });
+    if (res.ok) return res.json();
+    const body = await res.text();
+    if (res.status >= 500 || res.status === 429) {
+      lastErr = new Error(`HubSpot API error ${res.status}: ${body}`);
+      await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt)));
+      continue;
     }
-    throw lastErr || new Error("HubSpot API retry limit exceeded");
-  } finally {
-    _releaseHsSlot();
+    throw new Error(`HubSpot API error ${res.status}: ${body}`);
   }
+  throw lastErr || new Error("HubSpot API retry limit exceeded");
 }
 
 /** HS returns company date properties as "YYYY-MM-DD" strings OR millisecond timestamps, handle both. */

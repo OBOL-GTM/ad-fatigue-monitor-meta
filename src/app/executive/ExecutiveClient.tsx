@@ -276,7 +276,7 @@ export default function ExecutiveClient({
           {wow.weekly.length > 0 && (
             <div className="lv-card p-6 mb-6">
               <div className="mb-4">
-                <h2 className="text-[15px] font-semibold text-foreground">Weekly trend, last 8 weeks</h2>
+                <h2 className="text-[15px] font-semibold text-foreground">Weekly trend, last 13 weeks</h2>
                 <p className="text-[12px] text-muted-foreground">Each point is a rolling 7-day window ending on that Sunday equivalent. Track inbounds + CPL week by week.</p>
               </div>
               <div style={{ width: "100%", height: 260 }}>

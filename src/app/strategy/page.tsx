@@ -504,7 +504,7 @@ export default async function StrategyPage({
   // independent of the user-selected range) so the WoW cards are stable
   // even when Orly is looking at e.g. "last month" in the range picker.
   // ─────────────────────────────────────────────────────────────
-  const weeklyTrendFromDate = subDays(now, 8 * 7);
+  const weeklyTrendFromDate = subDays(now, 13 * 7);
   const weeklyFromStr = format(weeklyTrendFromDate, "yyyy-MM-dd");
   const todayStr = format(now, "yyyy-MM-dd");
   const [wowMetricsRaw, hubspotWoW] = await Promise.all([
@@ -546,7 +546,7 @@ export default async function StrategyPage({
     dailyMqls: wowMqlsByDate,
     dailySqls: wowSqlsByDate,
     now,
-    weeksBack: 8,
+    weeksBack: 13,
   });
 
   return (

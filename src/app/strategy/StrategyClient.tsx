@@ -253,7 +253,7 @@ export default function StrategyClient({
           </div>
           {wow.weekly.length > 0 && (
             <div>
-              <div className="text-[13px] font-semibold text-foreground mb-1">Last 8 weeks</div>
+              <div className="text-[13px] font-semibold text-foreground mb-1">Last 13 weeks</div>
               <div className="text-[11px] text-muted-foreground mb-3">Spend, inbounds, SQLs and CPL by rolling 7-day week.</div>
               <div style={{ width: "100%", height: 240 }}>
                 <ResponsiveContainer>

@@ -357,7 +357,7 @@ export default function LeadsClient({
           {/* 8-week weekly trend chart */}
           {wow.weekly.length > 0 && (
             <div className="mt-6">
-              <div className="text-[13px] font-semibold text-gray-900 mb-1">Last 8 weeks</div>
+              <div className="text-[13px] font-semibold text-gray-900 mb-1">Last 13 weeks</div>
               <div className="text-[11px] text-gray-500 mb-3">Spend, inbounds, SQLs and CPL by rolling 7-day week.</div>
               <div className="h-[260px]">
                 <ResponsiveContainer width="100%" height="100%">

@@ -58,7 +58,7 @@ export default async function ExecutivePage({
   const lastMonthStartLocal = startOfMonth(subMonths(now, 1));
   const momFromStr = format(lastMonthStartLocal, "yyyy-MM-dd");
   // WoW window: trailing 8 weeks (covers WoW + the 8-week weekly trend chart).
-  const weeklyTrendFromDate = subDays(now, 8 * 7);
+  const weeklyTrendFromDate = subDays(now, 13 * 7);
   const weeklyFromStr = format(weeklyTrendFromDate, "yyyy-MM-dd");
   const metricsFromStr = [rangeFromStr, momFromStr, weeklyFromStr].sort()[0];
 
@@ -325,7 +325,7 @@ export default async function ExecutivePage({
     dailyMqls: wowMqlsByDate,
     dailySqls: wowSqlsByDate,
     now,
-    weeksBack: 8,
+    weeksBack: 13,
   });
 
   // When the user selects a range other than "this-month", the stat cards
