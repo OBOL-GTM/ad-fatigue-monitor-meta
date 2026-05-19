@@ -671,20 +671,16 @@ async function discoverMqlProperty(): Promise<string | null> {
  * createdate. Dates returned are the lead-date if present, falling back to
  * createdate.
  */
-// Shotgun candidate list for "Inbound Lead - Monthly" — the date property
-// HubSpot's MQL distribution chart buckets on. Tried in parallel; properties
-// that don't exist on this portal's Companies schema error with 400 and are
-// silently skipped. Whatever exists + has values gets unioned in.
+// Candidate date properties for HubSpot's "Inbound Lead - Monthly" chart
+// x-axis. Tried in parallel; properties that don't exist on this portal
+// error with 400 and are silently skipped. Trimmed from 9 to 3 on
+// 2026-05-19 — the other 6 always returned empty/400 on Obol's portal
+// and the extra queries were tripping rate limits during 13-week WoW
+// fetches (44 queries → 15 queries).
 const INBOUND_DATE_CANDIDATES = [
-  "inbound_lead",
-  "inbound_lead_date",
-  "first_inbound_lead_date",
-  "hs_inbound_lead_date",
-  "lead_qualifying_date",
-  "lead_qualification_date",
-  "became_lead_date",
-  "hs_lifecyclestage_lead_date",
-  "createdate",
+  "inbound_lead_date",          // Obol's most likely custom name
+  "hs_lifecyclestage_lead_date", // HubSpot built-in for lifecycle = lead
+  "createdate",                  // safe fallback, always works
 ];
 
 async function _fetchLiteMQL(fromDate: string, toDate: string): Promise<{
