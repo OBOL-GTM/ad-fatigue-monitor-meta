@@ -248,6 +248,7 @@ export default async function StrategyPage({
   const totalATM = hs?.totalATM ?? 0;
   const totalSQLs = hs?.totalSQLs ?? 0;
   const totalMQLs = hs?.totalMQLs ?? 0;
+  const totalInbounds = hs?.totalInbounds ?? 0;
   // Daily ATM from lite (no per-day sqls — that's derived from dailySQLDeals
   // below, matching the headline deal-based total).
   const hubspotATM = hs?.dailyATM.map(d => ({ date: d.date, atm: d.atm, sqls: 0 })) ?? [];
@@ -258,9 +259,9 @@ export default async function StrategyPage({
   const costPerSQL = totalSQLs > 0 ? totalSpend / totalSQLs : null;
   const demoToSQLRate = totalATM > 0 ? (totalSQLs / totalATM) * 100 : null;
   const clickToLeadRate = totalClicks > 0 ? (totalATM / totalClicks) * 100 : null;
-  // MQL Yes/No share among inbound demos. Cap at 100% since MQL events can
-  // happen on contacts outside the ATM bucket (lite skips the ATM dedupe).
-  const mqlYesShare = totalATM > 0 ? Math.min(100, (totalMQLs / totalATM) * 100) : null;
+  // MQL Yes share = MQL companies / total inbound companies in the period.
+  // Mirrors HubSpot's native "MQL distribution" 100%-stacked chart exactly.
+  const mqlYesShare = totalInbounds > 0 ? Math.min(100, (totalMQLs / totalInbounds) * 100) : null;
 
   // PER-CAMPAIGN CPL: join Meta campaign spend to HS ATM counts via utm_campaign.
   // Match is best-effort (normalize: lowercase, strip non-alphanumerics, substring
@@ -578,6 +579,7 @@ export default async function StrategyPage({
         wow={wow}
         costPerMQL={costPerMQL !== null ? Math.round(costPerMQL * 100) / 100 : null}
         mqlYesShare={mqlYesShare !== null ? Math.round(mqlYesShare * 10) / 10 : null}
+        totalInbounds={totalInbounds}
       />
 
       {/* Analytics section */}

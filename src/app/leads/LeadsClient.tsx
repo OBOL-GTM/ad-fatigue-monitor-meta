@@ -43,6 +43,7 @@ interface Props {
   wow?: WoWData;
   costPerMQL?: number | null;
   mqlYesShare?: number | null;
+  totalInbounds?: number;
 }
 
 function formatNum(n: number): string {
@@ -60,7 +61,7 @@ export default function LeadsClient({
   dailyData, campaignBreakdown, rangeFrom, rangeTo, activeAdCount,
   hubspotATM, hubspotMQLs, totalATM, totalSQLs, totalMQLs,
   campaignNames, dailyByCampaign, leadContacts, dailyCPL, wow,
-  costPerMQL, mqlYesShare,
+  costPerMQL, mqlYesShare, totalInbounds,
 }: Props) {
   const router = useRouter();
   const [from, setFrom] = useState(rangeFrom);
@@ -324,70 +325,6 @@ export default function LeadsClient({
         </div>
       )}
 
-      {/* MQL yes/no distribution + daily MQL trend (mirrors HubSpot inbound dashboard) */}
-      {hasHubSpot && totalATM != null && totalATM > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          <div className="lv-card p-6">
-            <h2 className="text-[16px] font-semibold mb-1">MQL distribution</h2>
-            <p className="text-[12px] text-gray-500 mb-4">Of inbound demos this period, how many are marketing-qualified.</p>
-            <div className="h-[260px] flex items-center justify-center">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={[
-                      { name: "MQL Yes", value: Math.min(totalMQLs ?? 0, totalATM), fill: "#8b5cf6" },
-                      { name: "MQL No", value: Math.max(0, totalATM - (totalMQLs ?? 0)), fill: "#e5e7eb" },
-                    ]}
-                    cx="50%" cy="50%" innerRadius={60} outerRadius={100}
-                    paddingAngle={2} dataKey="value" nameKey="name"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    labelLine={{ stroke: "#9ca3af", strokeWidth: 1 }}
-                  >
-                    <Cell fill="#8b5cf6" />
-                    <Cell fill="#e5e7eb" />
-                  </Pie>
-                  <Tooltip formatter={(value: number) => `${value} contacts`} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="text-center text-[12px] text-gray-500 mt-2">
-              {mqlYesShare != null ? `${mqlYesShare.toFixed(1)}% of inbounds reached MQL` : "-"}
-            </div>
-          </div>
-          <div className="lv-card p-6">
-            <h2 className="text-[16px] font-semibold mb-1">Daily MQLs vs spend</h2>
-            <p className="text-[12px] text-gray-500 mb-4">Marketing-qualified leads by create date, alongside daily ad spend.</p>
-            <div className="h-[260px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={(() => {
-                    const mqlMap = new Map((hubspotMQLs ?? []).map(d => [d.date, d.mqls]));
-                    return dailyData.map(d => ({ date: d.date, spend: d.spend, mqls: mqlMap.get(d.date) || 0 }));
-                  })()}
-                  margin={{ top: 10, right: 20, bottom: 20, left: 10 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="date" tick={{ fontSize: 10 }}
-                    tickFormatter={(v) => { const d = new Date(v + "T00:00:00"); return `${d.getMonth() + 1}/${d.getDate()}`; }} />
-                  <YAxis yAxisId="spend" tickFormatter={(v) => `$${v}`} tick={{ fontSize: 11 }} />
-                  <YAxis yAxisId="mqls" orientation="right" allowDecimals={false} tick={{ fontSize: 11 }} />
-                  <Tooltip
-                    labelFormatter={(v) => { const d = new Date(v + "T00:00:00"); return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); }}
-                    formatter={(value: any, name: string) => {
-                      if (name === "Spend") return [`$${Number(value).toFixed(0)}`, name];
-                      return [`${Number(value)} MQL${Number(value) === 1 ? "" : "s"}`, name];
-                    }}
-                  />
-                  <Legend />
-                  <Line yAxisId="spend" type="monotone" dataKey="spend" stroke="#6B93D8" strokeWidth={2} dot={false} name="Spend" />
-                  <Line yAxisId="mqls" type="monotone" dataKey="mqls" stroke="#8b5cf6" strokeWidth={2.5} dot={{ r: 3, fill: "#8b5cf6" }} name="MQLs" />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Week-over-week, always rolling last 7 days vs prior 7 days */}
       {wow && (
         <div className="lv-card p-6 mb-8 bg-gradient-to-br from-[#6B93D8]/5 via-[#9B7ED0]/5 to-[#D06AB8]/5">
@@ -440,6 +377,73 @@ export default function LeadsClient({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* MQL yes/no distribution + daily MQLs (mirrors HubSpot inbound dashboard).
+          Sits under WoW so the trailing metrics flow together. */}
+      {hasHubSpot && (totalInbounds ?? 0) > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <div className="lv-card p-6">
+            <h2 className="text-[16px] font-semibold mb-1">MQL distribution</h2>
+            <p className="text-[12px] text-gray-500 mb-4">Of inbound companies this period, how many are marketing-qualified.</p>
+            <div className="h-[260px] flex items-center justify-center">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={[
+                      { name: "Yes", value: Math.min(totalMQLs ?? 0, totalInbounds ?? 0), fill: "#8b5cf6" },
+                      { name: "No", value: Math.max(0, (totalInbounds ?? 0) - (totalMQLs ?? 0)), fill: "#e5e7eb" },
+                    ]}
+                    cx="50%" cy="50%" innerRadius={60} outerRadius={100}
+                    paddingAngle={2} dataKey="value" nameKey="name"
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    labelLine={{ stroke: "#9ca3af", strokeWidth: 1 }}
+                  >
+                    <Cell fill="#8b5cf6" />
+                    <Cell fill="#e5e7eb" />
+                  </Pie>
+                  <Tooltip formatter={(value: number) => `${value} companies`} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="text-center text-[12px] text-gray-500 mt-2">
+              {mqlYesShare != null
+                ? `${mqlYesShare.toFixed(1)}% of inbounds (${totalMQLs ?? 0} of ${totalInbounds ?? 0}) reached MQL`
+                : "-"}
+            </div>
+          </div>
+          <div className="lv-card p-6">
+            <h2 className="text-[16px] font-semibold mb-1">Daily MQLs vs spend</h2>
+            <p className="text-[12px] text-gray-500 mb-4">MQL-qualified companies by createdate, alongside daily ad spend.</p>
+            <div className="h-[260px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart
+                  data={(() => {
+                    const mqlMap = new Map((hubspotMQLs ?? []).map(d => [d.date, d.mqls]));
+                    return dailyData.map(d => ({ date: d.date, spend: d.spend, mqls: mqlMap.get(d.date) || 0 }));
+                  })()}
+                  margin={{ top: 10, right: 20, bottom: 20, left: 10 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }}
+                    tickFormatter={(v) => { const d = new Date(v + "T00:00:00"); return `${d.getMonth() + 1}/${d.getDate()}`; }} />
+                  <YAxis yAxisId="spend" tickFormatter={(v) => `$${v}`} tick={{ fontSize: 11 }} />
+                  <YAxis yAxisId="mqls" orientation="right" allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <Tooltip
+                    labelFormatter={(v) => { const d = new Date(v + "T00:00:00"); return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); }}
+                    formatter={(value: any, name: string) => {
+                      if (name === "Spend") return [`$${Number(value).toFixed(0)}`, name];
+                      return [`${Number(value)} MQL${Number(value) === 1 ? "" : "s"}`, name];
+                    }}
+                  />
+                  <Legend />
+                  <Line yAxisId="spend" type="monotone" dataKey="spend" stroke="#6B93D8" strokeWidth={2} dot={false} name="Spend" />
+                  <Line yAxisId="mqls" type="monotone" dataKey="mqls" stroke="#8b5cf6" strokeWidth={2.5} dot={{ r: 3, fill: "#8b5cf6" }} name="MQLs" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
       )}
 

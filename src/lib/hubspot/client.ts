@@ -233,6 +233,7 @@ export async function getLeadsFunnelLite(
   totalATM: number;
   totalSQLs: number;
   totalMQLs: number;
+  totalInbounds: number;
 }> {
   return cached(`lite:${fromDate}:${toDate}`, HUBSPOT_CACHE_TTL_MS, () =>
     _getLeadsFunnelLiteUncached(fromDate, toDate),
@@ -262,12 +263,13 @@ async function _getLeadsFunnelLiteUncached(
     cur = nextMonth;
   }
 
-  // Run each leg (ATM companies + SQL deals + MQL contacts) as its own
+  // Run each leg (ATM companies + SQL deals + MQL-via-companies) as its own
   // independent promise per slice, so a failure on one leg doesn't lose
   // the other legs' data for that month.
   const allAtmDates: string[] = [];
   const allSqlDates: string[] = [];
   const allMqlDates: string[] = [];
+  let totalInbounds = 0;
   await Promise.all(
     slices.flatMap(([sliceFrom, sliceTo]) => [
       _fetchLiteATM(sliceFrom, sliceTo)
@@ -281,7 +283,10 @@ async function _getLeadsFunnelLiteUncached(
           console.error(`[hubspot-lite] SQL slice ${sliceFrom}→${sliceTo} failed:`, err);
         }),
       _fetchLiteMQL(sliceFrom, sliceTo)
-        .then((d) => { allMqlDates.push(...d); })
+        .then(({ mqlYesDates, totalInbounds: sliceInbounds }) => {
+          allMqlDates.push(...mqlYesDates);
+          totalInbounds += sliceInbounds;
+        })
         .catch((err) => {
           console.error(`[hubspot-lite] MQL slice ${sliceFrom}→${sliceTo} failed:`, err);
         }),
@@ -313,6 +318,7 @@ async function _getLeadsFunnelLiteUncached(
     totalATM: allAtmDates.length,
     totalSQLs: allSqlDates.length,
     totalMQLs: allMqlDates.length,
+    totalInbounds,
   };
 }
 
@@ -584,50 +590,90 @@ async function _fetchLiteATM(fromDate: string, toDate: string): Promise<string[]
 }
 
 /**
- * Lite MQL fetch. Counts contacts whose hs_lifecyclestage_marketingqualifiedlead_date
- * (the date the contact became an MQL) falls in [fromDate, toDate]. This matches
- * the HubSpot native "MQLs by month" report exactly — every contact that ever
- * reached MQL stage during the window is counted, whether they later progressed
- * to SQL/Customer or not. Switching off createdate (which only catches contacts
- * created AND tagged MQL in the same window) was the audit fix on 2026-05-19.
+ * Lite MQL fetch — matches HubSpot's native "MQL distribution" inbound
+ * dashboard chart. That chart is built on the Companies object, x-axis =
+ * Inbound Lead - Monthly, break-down by the MQL property. We mirror that:
+ *
+ *   1. Query inbound companies (lead_source = Inbound, tier in allowlist,
+ *      createdate in range) with NO HubSpot-side MQL filter.
+ *   2. Discover the MQL property name once (the label is "MQL" but the
+ *      internal name varies between portals — could be "mql", "is_mql",
+ *      or a custom variant). Cache it for the process lifetime.
+ *   3. Filter client-side for truthy values ("true", "yes", "1").
+ *
+ * This is robust against property-name drift, gives us `totalInbounds`
+ * for the donut denominator (matching HubSpot's "100% stacked" chart),
+ * and stays fast (one paginated search instead of two).
  */
-const MQL_BECAME_DATE_PROP = "hs_lifecyclestage_marketingqualifiedlead_date";
+let _cachedMqlPropName: string | null = null;
+async function discoverMqlProperty(): Promise<string | null> {
+  if (_cachedMqlPropName !== null) return _cachedMqlPropName;
+  try {
+    const r = await hubspotFetch("/crm/v3/properties/companies", { method: "GET" });
+    const props: Array<{ name: string; label?: string }> = r.results || [];
+    // Prefer exact-name "mql", then any property whose name or label contains "mql"
+    // (case-insensitive). Filter out other date/timestamp MQL fields like
+    // hs_lifecyclestage_marketingqualifiedlead_date.
+    const exact = props.find(p => p.name === "mql");
+    const isMqlBool = (p: { name: string; label?: string }) => {
+      const n = (p.name || "").toLowerCase();
+      const l = (p.label || "").toLowerCase();
+      if (n.includes("date")) return false;
+      return n === "mql" || l === "mql" || (l.split(/\s+/).includes("mql") && !l.includes("date"));
+    };
+    const best = exact || props.find(isMqlBool) || null;
+    _cachedMqlPropName = best?.name || null;
+    if (best) {
+      console.log("[hubspot-lite] MQL property resolved to:", best.name, "(label:", best.label, ")");
+    } else {
+      console.warn("[hubspot-lite] no MQL-like company property found. Candidates:", props.filter(p => /mql/i.test(p.name) || /mql/i.test(p.label || "")).map(p => p.name));
+    }
+  } catch (err) {
+    console.error("[hubspot-lite] MQL property discovery failed:", err);
+    _cachedMqlPropName = null;
+  }
+  return _cachedMqlPropName;
+}
 
-async function _fetchLiteMQL(fromDate: string, toDate: string): Promise<string[]> {
+async function _fetchLiteMQL(fromDate: string, toDate: string): Promise<{
+  mqlYesDates: string[];
+  totalInbounds: number;
+}> {
+  const mqlProp = await discoverMqlProperty();
   const fromTs = new Date(fromDate + "T00:00:00Z").getTime();
   const toTs = new Date(toDate + "T23:59:59Z").getTime();
-  const searchBody = {
-    filterGroups: [{
-      filters: [
-        { propertyName: MQL_BECAME_DATE_PROP, operator: "GTE", value: String(fromTs) },
-        { propertyName: MQL_BECAME_DATE_PROP, operator: "LTE", value: String(toTs) },
-      ],
-    }],
-    properties: [MQL_BECAME_DATE_PROP],
+  const baseFilters = [
+    { propertyName: "createdate", operator: "GTE", value: String(fromTs) },
+    { propertyName: "createdate", operator: "LTE", value: String(toTs) },
+    { propertyName: COMPANY_LEAD_SOURCE_PROP, operator: "EQ", value: "Inbound" },
+    { propertyName: COMPANY_TIER_PROP, operator: "IN", values: COMPANY_TIER_ALLOWLIST },
+  ];
+
+  const mqlYesDates: string[] = [];
+  let totalInbounds = 0;
+  let after: string | undefined;
+  const properties = mqlProp ? ["createdate", mqlProp] : ["createdate"];
+  const body = {
+    filterGroups: [{ filters: baseFilters }],
+    properties,
     limit: 100,
   };
-  const raw: any[] = [];
-  let after: string | undefined;
   do {
-    const r = await hubspotFetch("/crm/v3/objects/contacts/search", {
+    const r = await hubspotFetch("/crm/v3/objects/companies/search", {
       method: "POST",
-      body: JSON.stringify({ ...searchBody, ...(after ? { after } : {}) }),
+      body: JSON.stringify({ ...body, ...(after ? { after } : {}) }),
     });
-    raw.push(...(r.results || []));
+    for (const c of (r.results || [])) {
+      totalInbounds++;
+      const d = parseCompanyDate(c.properties?.createdate);
+      if (!d) continue;
+      const v = mqlProp ? String(c.properties?.[mqlProp] ?? "").toLowerCase() : "";
+      if (v === "true" || v === "yes" || v === "1") mqlYesDates.push(d);
+    }
     after = r.paging?.next?.after;
   } while (after);
-  // HubSpot returns datetime values as either ms-timestamp strings or ISO strings.
-  // Normalise to YYYY-MM-DD via parseCompanyDate which already handles both.
-  const dates: string[] = [];
-  const seen = new Set<string>();
-  for (const c of raw) {
-    if (seen.has(c.id)) continue;
-    seen.add(c.id);
-    const value = c.properties?.[MQL_BECAME_DATE_PROP];
-    const d = parseCompanyDate(value);
-    if (d) dates.push(d);
-  }
-  return dates;
+
+  return { mqlYesDates, totalInbounds };
 }
 
 async function _fetchLiteSQL(fromDate: string, toDate: string): Promise<string[]> {
