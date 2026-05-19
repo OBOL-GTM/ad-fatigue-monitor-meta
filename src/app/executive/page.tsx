@@ -5,9 +5,10 @@ import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 import { redirect } from "next/navigation";
 import {
   format, startOfMonth, endOfMonth, subMonths, addMonths, isBefore,
-  isAfter, startOfYear,
+  isAfter, startOfYear, subDays,
 } from "date-fns";
 import { getLeadsFunnelLite } from "@/lib/hubspot/client";
+import { computeWoW } from "@/lib/wow";
 import ExecutiveClient from "./ExecutiveClient";
 import FreshnessGuard from "@/components/FreshnessGuard";
 import MetaTokenBanner from "@/components/MetaTokenBanner";
@@ -56,9 +57,12 @@ export default async function ExecutivePage({
   // MoM card both have their data in a single metrics query.
   const lastMonthStartLocal = startOfMonth(subMonths(now, 1));
   const momFromStr = format(lastMonthStartLocal, "yyyy-MM-dd");
-  const metricsFromStr = rangeFromStr < momFromStr ? rangeFromStr : momFromStr;
+  // WoW window: trailing 8 weeks (covers WoW + the 8-week weekly trend chart).
+  const weeklyTrendFromDate = subDays(now, 8 * 7);
+  const weeklyFromStr = format(weeklyTrendFromDate, "yyyy-MM-dd");
+  const metricsFromStr = [rangeFromStr, momFromStr, weeklyFromStr].sort()[0];
 
-  const [allAds, metricsRaw, hubspotResult, hubspotMoM] = await Promise.all([
+  const [allAds, metricsRaw, hubspotResult, hubspotMoM, hubspotWoW] = await Promise.all([
     db.select().from(ads).where(inArray(ads.accountId, allAccountIds)).all(),
     db.select().from(dailyMetrics).where(gte(dailyMetrics.date, metricsFromStr)).all(),
     getLeadsFunnelLite(rangeFromStr, rangeToStr).catch(err => {
@@ -70,6 +74,11 @@ export default async function ExecutivePage({
     // otherwise drop April from the main hubspotResult).
     getLeadsFunnelLite(momFromStr, format(now, "yyyy-MM-dd")).catch(err => {
       console.error("[executive] HubSpot MoM fetch failed:", err);
+      return null;
+    }),
+    // Separate HubSpot query for WoW + 8-week trend, always anchored on today.
+    getLeadsFunnelLite(weeklyFromStr, format(now, "yyyy-MM-dd")).catch(err => {
+      console.error("[executive] HubSpot WoW fetch failed:", err);
       return null;
     }),
   ]);
@@ -271,6 +280,32 @@ export default async function ExecutivePage({
 
   const lastSyncedAt = allAds.reduce((max, ad) => Math.max(max, ad.lastSyncedAt ?? 0), 0);
 
+  // WoW: build daily maps over the last ~8 weeks (always anchored on today,
+  // independent of the selected range) and feed them to computeWoW.
+  const wowSpendByDate = new Map<string, number>();
+  for (const m of metricsRaw) {
+    if (!allAdIds.has(m.adId)) continue;
+    if (m.date < weeklyFromStr) continue;
+    wowSpendByDate.set(m.date, (wowSpendByDate.get(m.date) || 0) + (m.spend ?? 0));
+  }
+  const wowAtmByDate = new Map<string, number>();
+  const wowSqlsByDate = new Map<string, number>();
+  if (hubspotWoW) {
+    for (const d of hubspotWoW.dailyATM) {
+      wowAtmByDate.set(d.date, (wowAtmByDate.get(d.date) || 0) + d.atm);
+    }
+    for (const d of hubspotWoW.dailySQLDeals) {
+      wowSqlsByDate.set(d.date, (wowSqlsByDate.get(d.date) || 0) + d.sqlDeals);
+    }
+  }
+  const wow = computeWoW({
+    dailySpend: wowSpendByDate,
+    dailyAtm: wowAtmByDate,
+    dailySqls: wowSqlsByDate,
+    now,
+    weeksBack: 8,
+  });
+
   // When the user selects a range other than "this-month", the stat cards
   // should reflect the selected range, not the hardcoded current month.
   const isThisMonthPreset = preset === "this-month";
@@ -394,6 +429,7 @@ export default async function ExecutivePage({
         topCampaigns={topCampaigns}
         topAdByConversions={topAdByConversions}
         topAdBySpend={topAdBySpend}
+        wow={wow}
       />
     </div>
   );

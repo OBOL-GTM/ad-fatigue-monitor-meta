@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import DateRangePicker from "@/components/DateRangePicker";
 import QuickPresets from "@/components/QuickPresets";
+import type { WoWData } from "@/lib/wow";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   Cell, LineChart, Line, Legend, AreaChart, Area, ScatterChart, Scatter, ZAxis,
@@ -39,6 +40,7 @@ interface Props {
   dailyByCampaign: Record<string, any>[];
   leadContacts?: LeadContact[];
   dailyCPL?: DailyCPL[];
+  wow?: WoWData;
 }
 
 function formatNum(n: number): string {
@@ -55,7 +57,7 @@ export default function LeadsClient({
   totalSpend, totalClicks, totalImpressions, totalConversions, totalReach,
   dailyData, campaignBreakdown, rangeFrom, rangeTo, activeAdCount,
   hubspotATM, hubspotMQLs, totalATM, totalSQLs, totalMQLs,
-  campaignNames, dailyByCampaign, leadContacts, dailyCPL,
+  campaignNames, dailyByCampaign, leadContacts, dailyCPL, wow,
 }: Props) {
   const router = useRouter();
   const [from, setFrom] = useState(rangeFrom);
@@ -310,6 +312,57 @@ export default function LeadsClient({
               Connect HubSpot
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Week-over-week, always rolling last 7 days vs prior 7 days */}
+      {wow && (
+        <div className="lv-card p-6 mb-8 bg-gradient-to-br from-[#6B93D8]/5 via-[#9B7ED0]/5 to-[#D06AB8]/5">
+          <div className="flex items-baseline justify-between flex-wrap gap-2 mb-4">
+            <div>
+              <h2 className="text-[16px] font-semibold text-gray-900">Week over week</h2>
+              <p className="text-[12px] text-gray-500">
+                {wow.thisWeekLabel} vs {wow.lastWeekLabel}. Rolling 7-day window, anchored on today.
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <WoWStatCard label="Ad spend" value={`$${wow.thisWeek.spend.toLocaleString("en-US", { maximumFractionDigits: 0 })}`} delta={wow.deltas.spend} color="#6B93D8" />
+            <WoWStatCard label="Inbounds" value={wow.thisWeek.atm.toLocaleString()} delta={wow.deltas.atm} color="#D06AB8" />
+            <WoWStatCard label="SQLs" value={wow.thisWeek.sqls.toLocaleString()} delta={wow.deltas.sqls} color="#06b6d4" />
+            <WoWStatCard label="CPL" value={wow.thisWeek.cpl != null ? `$${wow.thisWeek.cpl.toFixed(2)}` : "-"} delta={wow.deltas.cpl} invertDelta color="#F04E80" />
+            <WoWStatCard label="Cost per SQL" value={wow.thisWeek.costPerSql != null ? `$${wow.thisWeek.costPerSql.toFixed(2)}` : "-"} delta={wow.deltas.costPerSql} invertDelta color="#8b5cf6" />
+          </div>
+
+          {/* 8-week weekly trend chart */}
+          {wow.weekly.length > 0 && (
+            <div className="mt-6">
+              <div className="text-[13px] font-semibold text-gray-900 mb-1">Last 8 weeks</div>
+              <div className="text-[11px] text-gray-500 mb-3">Spend, inbounds, SQLs and CPL by rolling 7-day week.</div>
+              <div className="h-[260px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={wow.weekly} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                    <YAxis yAxisId="left" tickFormatter={(v) => `$${v}`} tick={{ fontSize: 11 }} />
+                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
+                    <Tooltip
+                      formatter={(value: any, name: string) => {
+                        if (value === null || value === undefined) return ["-", name];
+                        if (name === "Spend" || name === "CPL") return [`$${Number(value).toLocaleString("en-US", { maximumFractionDigits: 0 })}`, name];
+                        return [Number(value).toLocaleString(), name];
+                      }}
+                    />
+                    <Legend />
+                    <Line yAxisId="left" type="monotone" dataKey="spend" stroke="#6B93D8" strokeWidth={2} dot={{ r: 3 }} name="Spend" />
+                    <Line yAxisId="right" type="monotone" dataKey="atm" stroke="#D06AB8" strokeWidth={2} dot={{ r: 3 }} name="Inbounds" />
+                    <Line yAxisId="right" type="monotone" dataKey="sqls" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3 }} name="SQLs" />
+                    <Line yAxisId="left" type="monotone" dataKey="cpl" stroke="#F04E80" strokeWidth={2.5} strokeDasharray="4 2" dot={{ r: 2.5, fill: "#F04E80" }} connectNulls name="CPL" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -594,6 +647,24 @@ function StatCard({ label, value, color, subtitle }: { label: string; value: str
       <div className="text-2xl font-bold" style={color ? { color } : undefined}>{value}</div>
       <div className="text-[12px] text-gray-500 mt-1">{label}</div>
       {subtitle && <div className="text-[10px] text-gray-400">{subtitle}</div>}
+    </div>
+  );
+}
+
+function WoWStatCard({
+  label, value, delta, invertDelta = false, color,
+}: { label: string; value: string; delta: number | null; invertDelta?: boolean; color?: string }) {
+  const isNeutral = delta == null || Math.abs(delta) < 0.5;
+  const isPositive = delta != null && (invertDelta ? delta < 0 : delta > 0);
+  const deltaColor = isNeutral ? "text-gray-400" : isPositive ? "text-green-600" : "text-red-600";
+  const arrow = delta == null ? "" : isNeutral ? "→" : delta > 0 ? "↑" : "↓";
+  return (
+    <div className="lv-card p-4">
+      <div className="text-[11px] uppercase tracking-wide text-gray-500 font-medium">{label}</div>
+      <div className="text-[24px] font-bold tabular-nums mt-1" style={color ? { color } : undefined}>{value}</div>
+      <div className={`text-[12px] font-medium ${deltaColor} mt-0.5`}>
+        {delta == null ? "no data last week" : `${arrow} ${Math.abs(delta).toFixed(1)}% WoW`}
+      </div>
     </div>
   );
 }

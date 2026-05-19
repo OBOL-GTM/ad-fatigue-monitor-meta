@@ -6,8 +6,9 @@ import type { ScoringSettings } from "@/lib/fatigue/types";
 import { DEFAULT_SETTINGS } from "@/lib/fatigue/types";
 import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 import { redirect } from "next/navigation";
-import { format, startOfMonth, endOfMonth } from "date-fns";
+import { format, startOfMonth, endOfMonth, subDays } from "date-fns";
 import { getLeadsFunnelLite, getATMLeadsByCampaign, getClosedWonRevenue } from "@/lib/hubspot/client";
+import { computeWoW } from "@/lib/wow";
 import StrategyClient from "./StrategyClient";
 import LeadsClient from "../leads/LeadsClient";
 import FreshnessGuard from "@/components/FreshnessGuard";
@@ -493,6 +494,51 @@ export default async function StrategyPage({
 
   const lastSyncedAt = allAdsRaw.reduce((max, ad) => Math.max(max, ad.lastSyncedAt ?? 0), 0);
 
+  // ─────────────────────────────────────────────────────────────
+  // WoW: build daily maps over the last ~8 weeks (always anchored on today,
+  // independent of the user-selected range) so the WoW cards are stable
+  // even when Orly is looking at e.g. "last month" in the range picker.
+  // ─────────────────────────────────────────────────────────────
+  const weeklyTrendFromDate = subDays(now, 8 * 7);
+  const weeklyFromStr = format(weeklyTrendFromDate, "yyyy-MM-dd");
+  const todayStr = format(now, "yyyy-MM-dd");
+  const [wowMetricsRaw, hubspotWoW] = await Promise.all([
+    db.select().from(dailyMetrics).where(and(gte(dailyMetrics.date, weeklyFromStr), lte(dailyMetrics.date, todayStr))).all(),
+    getLeadsFunnelLite(weeklyFromStr, todayStr).catch(err => {
+      console.error("[strategy] HubSpot WoW fetch failed:", err);
+      return null;
+    }),
+  ]);
+  const wowAdIdSet = new Set(allAdsRaw.map(a => a.id));
+  const wowDedupe = new Map<string, typeof wowMetricsRaw[number]>();
+  for (const m of wowMetricsRaw) {
+    if (!wowAdIdSet.has(m.adId)) continue;
+    const key = `${m.adId}:${m.date}`;
+    const existing = wowDedupe.get(key);
+    if (!existing || (m.spend ?? 0) > (existing.spend ?? 0)) wowDedupe.set(key, m);
+  }
+  const wowSpendByDate = new Map<string, number>();
+  for (const m of wowDedupe.values()) {
+    wowSpendByDate.set(m.date, (wowSpendByDate.get(m.date) || 0) + (m.spend ?? 0));
+  }
+  const wowAtmByDate = new Map<string, number>();
+  const wowSqlsByDate = new Map<string, number>();
+  if (hubspotWoW) {
+    for (const d of hubspotWoW.dailyATM) {
+      wowAtmByDate.set(d.date, (wowAtmByDate.get(d.date) || 0) + d.atm);
+    }
+    for (const d of hubspotWoW.dailySQLDeals) {
+      wowSqlsByDate.set(d.date, (wowSqlsByDate.get(d.date) || 0) + d.sqlDeals);
+    }
+  }
+  const wow = computeWoW({
+    dailySpend: wowSpendByDate,
+    dailyAtm: wowAtmByDate,
+    dailySqls: wowSqlsByDate,
+    now,
+    weeksBack: 8,
+  });
+
   return (
     <div className="min-h-screen">
       <div className="px-8 pt-6">
@@ -520,6 +566,7 @@ export default async function StrategyPage({
         dailyByCampaign={dailyByCampaign}
         leadContacts={allLeadContacts.length > 0 ? allLeadContacts : undefined}
         dailyCPL={dailyCPL}
+        wow={wow}
       />
 
       {/* Analytics section */}
@@ -548,6 +595,7 @@ export default async function StrategyPage({
         unmatchedRevenue={unmatchedRevenue}
         unmatchedRevenueTotal={Math.round(unmatchedRevenueTotal * 100) / 100}
         rangeLabel={`${format(new Date(rangeStart + "T12:00:00"), "MMM d")} – ${format(new Date(rangeEnd + "T12:00:00"), "MMM d, yyyy")}`}
+        wow={wow}
       />
     </div>
   );

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import DateRangePicker from "@/components/DateRangePicker";
 import QuickPresets from "@/components/QuickPresets";
+import type { WoWData } from "@/lib/wow";
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
   BarChart, Bar,
@@ -73,6 +74,7 @@ type Props = {
     cpl: number | null;
     costPerSql: number | null;
   }>;
+  wow?: WoWData;
 };
 
 function formatMoney(n: number): string {
@@ -144,6 +146,7 @@ export default function ExecutiveClient({
   trend, monthlyTable, topCampaigns,
   topAdByConversions, topAdBySpend,
   dailyMTD = [],
+  wow,
 }: Props) {
   const router = useRouter();
   const hasTrendData = trend.some(t => t.spend > 0 || t.atm > 0);
@@ -229,6 +232,60 @@ export default function ExecutiveClient({
         <StatCard label="SQLs" value={thisMonth.sqls.toLocaleString()} delta={deltas.sqls} comparisonLabel={comparisonLabel} />
         <StatCard label="Cost per lead" value={thisMonth.cpl != null ? formatMoney(thisMonth.cpl) : "-"} delta={deltas.cpl} invertDelta comparisonLabel={comparisonLabel} />
       </div>
+
+      {/* WoW: this week vs last week, always anchored on today */}
+      {wow && (
+        <>
+          <div className="mb-2">
+            <div className="text-[13px] font-semibold text-foreground">
+              This week ({wow.thisWeekLabel})
+            </div>
+            <div className="text-[12px] text-muted-foreground">
+              Compared to last week ({wow.lastWeekLabel})
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+            <StatCard label="Ad spend" value={formatMoney(wow.thisWeek.spend)} delta={wow.deltas.spend} comparisonLabel="WoW" />
+            <StatCard label="Inbounds" value={wow.thisWeek.atm.toLocaleString()} delta={wow.deltas.atm} comparisonLabel="WoW" />
+            <StatCard label="SQLs" value={wow.thisWeek.sqls.toLocaleString()} delta={wow.deltas.sqls} comparisonLabel="WoW" />
+            <StatCard label="CPL" value={wow.thisWeek.cpl != null ? formatMoney(wow.thisWeek.cpl) : "-"} delta={wow.deltas.cpl} invertDelta comparisonLabel="WoW" />
+            <StatCard label="Cost per SQL" value={wow.thisWeek.costPerSql != null ? formatMoney(wow.thisWeek.costPerSql) : "-"} delta={wow.deltas.costPerSql} invertDelta comparisonLabel="WoW" />
+          </div>
+
+          {/* 8-week weekly trend */}
+          {wow.weekly.length > 0 && (
+            <div className="lv-card p-6 mb-6">
+              <div className="mb-4">
+                <h2 className="text-[15px] font-semibold text-foreground">Weekly trend, last 8 weeks</h2>
+                <p className="text-[12px] text-muted-foreground">Each point is a rolling 7-day window ending on that Sunday equivalent. Track inbounds + CPL week by week.</p>
+              </div>
+              <div style={{ width: "100%", height: 260 }}>
+                <ResponsiveContainer>
+                  <LineChart data={wow.weekly} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#6b7280" }} axisLine={false} tickLine={false} />
+                    <YAxis yAxisId="left" tick={{ fontSize: 11, fill: "#6b7280" }} axisLine={false} tickLine={false} width={50} tickFormatter={(v) => formatMoney(Number(v))} />
+                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: "#6b7280" }} axisLine={false} tickLine={false} width={50} />
+                    <Tooltip
+                      contentStyle={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "8px", fontSize: "12px" }}
+                      formatter={(value: any, name: string) => {
+                        if (value === null || value === undefined) return ["-", name];
+                        if (name === "Spend" || name === "CPL") return [formatMoney(Number(value)), name];
+                        return [Number(value).toLocaleString(), name];
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: "12px" }} />
+                    <Line yAxisId="left" type="monotone" dataKey="spend" name="Spend" stroke="#6B93D8" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line yAxisId="right" type="monotone" dataKey="atm" name="Inbounds" stroke="#9B7ED0" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line yAxisId="right" type="monotone" dataKey="sqls" name="SQLs" stroke="#D06AB8" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line yAxisId="left" type="monotone" dataKey="cpl" name="CPL" stroke="#F04E80" strokeWidth={2.5} strokeDasharray="4 2" dot={{ r: 2.5, fill: "#F04E80" }} connectNulls />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Main trend chart */}
       <div className="lv-card p-6 mb-6">

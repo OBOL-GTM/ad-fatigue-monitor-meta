@@ -7,6 +7,7 @@ import FatigueScoreBadge from "@/components/FatigueScoreBadge";
 import RecommendationsPanel from "@/components/RecommendationsPanel";
 import type { FatigueStage } from "@/lib/fatigue/types";
 import type { Recommendation } from "@/lib/strategy/recommendations";
+import type { WoWData } from "@/lib/wow";
 
 interface AdSummary {
   id: string;
@@ -65,6 +66,7 @@ interface StrategyClientProps {
   unmatchedRevenueTotal: number;
   recommendations: Recommendation[];
   rangeLabel: string;
+  wow?: WoWData;
 }
 
 const COLORS = ["#6B93D8", "#D06AB8", "#F04E80", "#22c55e", "#f59e0b", "#8b5cf6", "#06b6d4", "#ec4899", "#f97316", "#14b8a6"];
@@ -95,7 +97,7 @@ export default function StrategyClient({
   totalATM, totalSQLs, costPerDemo, costPerSQL, demoToSQLRate, clickToLeadRate,
   dayOfWeek, campaignCPL, unmatchedUtm,
   totalRevenue, wonCount, totalROAS, unmatchedRevenue, unmatchedRevenueTotal,
-  recommendations, rangeLabel,
+  recommendations, rangeLabel, wow,
 }: StrategyClientProps) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("overview");
@@ -212,6 +214,72 @@ export default function StrategyClient({
           </div>
         </div>
       </div>
+
+      {/* WEEK-OVER-WEEK */}
+      {wow && (
+        <div className="lv-card p-6 mb-6">
+          <div className="flex items-baseline justify-between flex-wrap gap-2 mb-4">
+            <div>
+              <h2 className="text-[15px] font-semibold text-foreground">Week over week</h2>
+              <p className="text-[12px] text-muted-foreground">
+                {wow.thisWeekLabel} vs {wow.lastWeekLabel}. Rolling 7-day window, anchored on today (independent of the range above).
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+            {[
+              { label: "Spend", value: formatCurrency(wow.thisWeek.spend), delta: wow.deltas.spend, color: "#6B93D8" },
+              { label: "Inbounds", value: wow.thisWeek.atm.toLocaleString(), delta: wow.deltas.atm, color: "#D06AB8" },
+              { label: "SQLs", value: wow.thisWeek.sqls.toLocaleString(), delta: wow.deltas.sqls, color: "#06b6d4" },
+              { label: "CPL", value: wow.thisWeek.cpl != null ? formatCurrency(wow.thisWeek.cpl) : "-", delta: wow.deltas.cpl, color: "#F04E80", invertDelta: true },
+              { label: "Cost per SQL", value: wow.thisWeek.costPerSql != null ? formatCurrency(wow.thisWeek.costPerSql) : "-", delta: wow.deltas.costPerSql, color: "#8b5cf6", invertDelta: true },
+            ].map(c => {
+              const isNeutral = c.delta == null || Math.abs(c.delta) < 0.5;
+              const isPositive = c.delta != null && (c.invertDelta ? c.delta < 0 : c.delta > 0);
+              const deltaColor = isNeutral ? "text-gray-400" : isPositive ? "text-green-600" : "text-red-600";
+              const arrow = c.delta == null ? "" : isNeutral ? "→" : c.delta > 0 ? "↑" : "↓";
+              return (
+                <div key={c.label} className="rounded-xl bg-white p-3 border border-border">
+                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">{c.label}</div>
+                  <div className="text-[22px] font-bold tabular-nums mt-1" style={{ color: c.color }}>{c.value}</div>
+                  <div className={`text-[12px] font-medium ${deltaColor} mt-0.5`}>
+                    {c.delta == null ? "no data last week" : `${arrow} ${Math.abs(c.delta).toFixed(1)}% WoW`}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {wow.weekly.length > 0 && (
+            <div>
+              <div className="text-[13px] font-semibold text-foreground mb-1">Last 8 weeks</div>
+              <div className="text-[11px] text-muted-foreground mb-3">Spend, inbounds, SQLs and CPL by rolling 7-day week.</div>
+              <div style={{ width: "100%", height: 240 }}>
+                <ResponsiveContainer>
+                  <LineChart data={wow.weekly} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#6b7280" }} axisLine={false} tickLine={false} />
+                    <YAxis yAxisId="left" tick={{ fontSize: 11, fill: "#6b7280" }} axisLine={false} tickLine={false} width={50} tickFormatter={(v) => formatCurrency(Number(v))} />
+                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: "#6b7280" }} axisLine={false} tickLine={false} width={40} />
+                    <Tooltip
+                      contentStyle={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "8px", fontSize: "12px" }}
+                      formatter={(value: any, name: string) => {
+                        if (value === null || value === undefined) return ["-", name];
+                        if (name === "Spend" || name === "CPL") return [formatCurrency(Number(value)), name];
+                        return [Number(value).toLocaleString(), name];
+                      }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: "12px" }} />
+                    <Line yAxisId="left" type="monotone" dataKey="spend" name="Spend" stroke="#6B93D8" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line yAxisId="right" type="monotone" dataKey="atm" name="Inbounds" stroke="#D06AB8" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line yAxisId="right" type="monotone" dataKey="sqls" name="SQLs" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line yAxisId="left" type="monotone" dataKey="cpl" name="CPL" stroke="#F04E80" strokeWidth={2.5} strokeDasharray="4 2" dot={{ r: 2.5, fill: "#F04E80" }} connectNulls />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* DAY-OF-WEEK */}
       <div className="lv-card p-6 mb-6">
