@@ -647,7 +647,18 @@ async function discoverMqlProperty(): Promise<string | null> {
  * createdate. Dates returned are the lead-date if present, falling back to
  * createdate.
  */
+// Shotgun candidate list for "Inbound Lead - Monthly" — the date property
+// HubSpot's MQL distribution chart buckets on. Tried in parallel; properties
+// that don't exist on this portal's Companies schema error with 400 and are
+// silently skipped. Whatever exists + has values gets unioned in.
 const INBOUND_DATE_CANDIDATES = [
+  "inbound_lead",
+  "inbound_lead_date",
+  "first_inbound_lead_date",
+  "hs_inbound_lead_date",
+  "lead_qualifying_date",
+  "lead_qualification_date",
+  "became_lead_date",
   "hs_lifecyclestage_lead_date",
   "createdate",
 ];
@@ -660,9 +671,10 @@ async function _fetchLiteMQL(fromDate: string, toDate: string): Promise<{
   const fromTs = new Date(fromDate + "T00:00:00Z").getTime();
   const toTs = new Date(toDate + "T23:59:59Z").getTime();
 
-  // Dedup by HubSpot company id. Prefer the lead-date when bucketing because
-  // that's what the native chart's X-axis ("Inbound Lead - Monthly") uses.
+  // Dedup by HubSpot company id. Per-candidate counts logged so Railway logs
+  // tell us which candidate is the right one (matches HubSpot's chart total).
   const seen = new Map<string, { dateStr: string; mql: boolean; src: string }>();
+  const perCandidateCount: Record<string, number> = {};
 
   await Promise.all(INBOUND_DATE_CANDIDATES.map(async (dateProp) => {
     // HubSpot's native "MQL distribution" inbound chart only filters on
@@ -675,9 +687,10 @@ async function _fetchLiteMQL(fromDate: string, toDate: string): Promise<{
       { propertyName: dateProp, operator: "LTE", value: String(toTs) },
       { propertyName: COMPANY_LEAD_SOURCE_PROP, operator: "EQ", value: "Inbound" },
     ];
-    const properties = ["createdate", "hs_lifecyclestage_lead_date"];
+    const properties = ["createdate", "hs_lifecyclestage_lead_date", dateProp];
     if (mqlProp) properties.push(mqlProp);
     let after: string | undefined;
+    let sliceCount = 0;
     try {
       do {
         const r = await hubspotFetch("/crm/v3/objects/companies/search", {
@@ -690,25 +703,36 @@ async function _fetchLiteMQL(fromDate: string, toDate: string): Promise<{
           }),
         });
         for (const c of (r.results || [])) {
+          sliceCount++;
           const id = String(c.id);
-          // Prefer hs_lifecyclestage_lead_date for the date bucket; fall back to createdate.
-          const lead = parseCompanyDate(c.properties?.hs_lifecyclestage_lead_date);
+          // Prefer the matched candidate's date for the bucket; fall back to
+          // createdate. This way buckets reflect when the company became an
+          // inbound lead (per the property HubSpot's chart uses), not when
+          // the record was first created in HubSpot.
+          const candidateDate = parseCompanyDate(c.properties?.[dateProp]);
           const created = parseCompanyDate(c.properties?.createdate);
-          const dateStr = lead || created;
+          const dateStr = candidateDate || created;
           if (!dateStr) continue;
           const v = mqlProp ? String(c.properties?.[mqlProp] ?? "").toLowerCase() : "";
           const mql = v === "true" || v === "yes" || v === "1";
-          // First-seen wins for the dateStr; but if we later see the company
-          // via a different date filter, don't overwrite (the union of either
-          // date being in range is what matches the HubSpot chart).
+          // First-seen wins for the dateStr; if we later see the company via
+          // a different candidate date filter, don't overwrite. The UNION of
+          // any candidate being in range is what matches the HubSpot chart.
           if (!seen.has(id)) seen.set(id, { dateStr, mql, src: dateProp });
         }
         after = r.paging?.next?.after;
       } while (after);
+      perCandidateCount[dateProp] = sliceCount;
     } catch (err) {
-      console.warn(`[hubspot-lite] MQL fetch by ${dateProp} failed (continuing):`, err);
+      // Property doesn't exist on this portal's schema — silently skip.
+      const msg = String(err).slice(0, 100);
+      if (!msg.includes("does not exist")) {
+        console.warn(`[hubspot-lite] MQL fetch by ${dateProp} failed:`, msg);
+      }
+      perCandidateCount[dateProp] = -1;  // -1 = property missing
     }
   }));
+  console.log(`[hubspot-lite] MQL ${fromDate}→${toDate} per-candidate counts:`, perCandidateCount);
 
   const mqlYesDates: string[] = [];
   let totalInbounds = 0;
