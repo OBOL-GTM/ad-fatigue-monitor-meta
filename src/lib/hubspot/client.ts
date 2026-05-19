@@ -106,30 +106,68 @@ async function getApiKey(): Promise<string> {
   throw new Error("HUBSPOT_API_KEY not configured");
 }
 
-async function hubspotFetch(path: string, options?: RequestInit): Promise<any> {
-  const apiKey = await getApiKey();
-  // Retry on 5xx + 429, HubSpot rate-limits bursts, and parallel slice
-  // queries easily trip that. Without retry, one 429 loses a whole month.
-  let lastErr: any = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(`${BASE_URL}${path}`, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        ...options?.headers,
-      },
-    });
-    if (res.ok) return res.json();
-    const body = await res.text();
-    if (res.status >= 500 || res.status === 429) {
-      lastErr = new Error(`HubSpot API error ${res.status}: ${body}`);
-      await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt)));
-      continue;
-    }
-    throw new Error(`HubSpot API error ${res.status}: ${body}`);
+// Concurrency limiter — HubSpot caps free-tier portals at 11 reqs/sec burst.
+// With month-sliced queries firing 9 MQL candidates + ATM + SQL per slice in
+// parallel, an 8-week window fires 33+ requests at once which intermittently
+// 429s the ATM/SQL legs (zeroing them out) and some MQL candidates (under-
+// counting). The retry logic below isn't enough on its own because all 429'd
+// requests retry simultaneously and trip the limit again.
+//
+// Cap to 8 in-flight requests at a time. Excess requests queue and run as
+// slots free up. Negligible latency cost (queries take ~200ms each, so a
+// burst of 33 finishes in ~1s instead of ~200ms), enormous reliability gain.
+const MAX_CONCURRENT_HS = 8;
+let _hsActive = 0;
+const _hsWaiting: Array<() => void> = [];
+
+function _acquireHsSlot(): Promise<void> {
+  if (_hsActive < MAX_CONCURRENT_HS) {
+    _hsActive++;
+    return Promise.resolve();
   }
-  throw lastErr || new Error("HubSpot API retry limit exceeded");
+  return new Promise<void>(resolve => {
+    _hsWaiting.push(() => {
+      _hsActive++;
+      resolve();
+    });
+  });
+}
+
+function _releaseHsSlot(): void {
+  _hsActive--;
+  const next = _hsWaiting.shift();
+  if (next) next();
+}
+
+async function hubspotFetch(path: string, options?: RequestInit): Promise<any> {
+  await _acquireHsSlot();
+  try {
+    const apiKey = await getApiKey();
+    // Retry on 5xx + 429, HubSpot rate-limits bursts, and parallel slice
+    // queries easily trip that. Without retry, one 429 loses a whole month.
+    let lastErr: any = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const res = await fetch(`${BASE_URL}${path}`, {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+          ...options?.headers,
+        },
+      });
+      if (res.ok) return res.json();
+      const body = await res.text();
+      if (res.status >= 500 || res.status === 429) {
+        lastErr = new Error(`HubSpot API error ${res.status}: ${body}`);
+        await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt)));
+        continue;
+      }
+      throw new Error(`HubSpot API error ${res.status}: ${body}`);
+    }
+    throw lastErr || new Error("HubSpot API retry limit exceeded");
+  } finally {
+    _releaseHsSlot();
+  }
 }
 
 /** HS returns company date properties as "YYYY-MM-DD" strings OR millisecond timestamps, handle both. */
