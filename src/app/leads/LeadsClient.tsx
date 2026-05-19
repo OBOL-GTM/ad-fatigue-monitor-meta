@@ -101,9 +101,11 @@ export default function LeadsClient({
   // each day is cumulative spend / cumulative ATMs through that day.
   // Flat on zero-lead days instead of spiking.
   const runningSeries = (dailyCPL ?? []).slice().sort((a, b) => a.date.localeCompare(b.date));
-  let cumSpend = 0, cumAtm = 0, cumSqls = 0;
+  const mqlsByDate = new Map((hubspotMQLs ?? []).map(d => [d.date, d.mqls]));
+  let cumSpend = 0, cumAtm = 0, cumSqls = 0, cumMqls = 0;
   let lastCPL: number | null = null;
   let lastCostPerSQL: number | null = null;
+  let lastCPMQL: number | null = null;
   let currentMonth = "";
   const runningData = runningSeries.map((d) => {
     const monthKey = d.date.slice(0, 7); // YYYY-MM
@@ -113,21 +115,27 @@ export default function LeadsClient({
       cumSpend = 0;
       cumAtm = 0;
       cumSqls = 0;
+      cumMqls = 0;
       lastCPL = null;
       lastCostPerSQL = null;
+      lastCPMQL = null;
     }
     cumSpend += d.spend || 0;
     cumAtm += d.atm || 0;
     cumSqls += d.sqls || 0;
+    cumMqls += mqlsByDate.get(d.date) || 0;
     if (cumAtm > 0) lastCPL = Math.round((cumSpend / cumAtm) * 100) / 100;
     if (cumSqls > 0) lastCostPerSQL = Math.round((cumSpend / cumSqls) * 100) / 100;
+    if (cumMqls > 0) lastCPMQL = Math.round((cumSpend / cumMqls) * 100) / 100;
     return {
       date: d.date,
       cumSpend: Math.round(cumSpend * 100) / 100,
       cumAtm,
       cumSqls,
+      cumMqls,
       cpl: lastCPL,
       costPerSql: lastCostPerSQL,
+      cpmql: lastCPMQL,
     };
   });
 
@@ -414,17 +422,13 @@ export default function LeadsClient({
             </div>
           </div>
           <div className="lv-card p-6">
-            <h2 className="text-[16px] font-semibold mb-1">Daily MQLs vs spend</h2>
-            <p className="text-[12px] text-gray-500 mb-4">MQL-qualified companies by createdate, alongside daily ad spend.</p>
+            <h2 className="text-[16px] font-semibold mb-1">MTD Spend vs MTD MQLs</h2>
+            <p className="text-[12px] text-gray-500 mb-4">
+              Cumulative ad spend and MQL-qualified companies day by day. Both reset on the 1st so you can compare the same day across months.
+            </p>
             <div className="h-[260px]">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart
-                  data={(() => {
-                    const mqlMap = new Map((hubspotMQLs ?? []).map(d => [d.date, d.mqls]));
-                    return dailyData.map(d => ({ date: d.date, spend: d.spend, mqls: mqlMap.get(d.date) || 0 }));
-                  })()}
-                  margin={{ top: 10, right: 20, bottom: 20, left: 10 }}
-                >
+                <LineChart data={runningData} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="date" tick={{ fontSize: 10 }}
                     tickFormatter={(v) => { const d = new Date(v + "T00:00:00"); return `${d.getMonth() + 1}/${d.getDate()}`; }} />
@@ -433,13 +437,15 @@ export default function LeadsClient({
                   <Tooltip
                     labelFormatter={(v) => { const d = new Date(v + "T00:00:00"); return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); }}
                     formatter={(value: any, name: string) => {
-                      if (name === "Spend") return [`$${Number(value).toFixed(0)}`, name];
-                      return [`${Number(value)} MQL${Number(value) === 1 ? "" : "s"}`, name];
+                      if (value === null || value === undefined) return ["-", name];
+                      if (name === "MTD spend") return [`$${Number(value).toFixed(0)}`, name];
+                      if (name === "MTD MQLs") return [`${Number(value)} MQL${Number(value) === 1 ? "" : "s"}`, name];
+                      return [value, name];
                     }}
                   />
                   <Legend />
-                  <Line yAxisId="spend" type="monotone" dataKey="spend" stroke="#6B93D8" strokeWidth={2} dot={false} name="Spend" />
-                  <Line yAxisId="mqls" type="monotone" dataKey="mqls" stroke="#8b5cf6" strokeWidth={2.5} dot={{ r: 3, fill: "#8b5cf6" }} name="MQLs" />
+                  <Line yAxisId="spend" type="monotone" dataKey="cumSpend" stroke="#6B93D8" strokeWidth={2} dot={false} name="MTD spend" />
+                  <Line yAxisId="mqls" type="monotone" dataKey="cumMqls" stroke="#8b5cf6" strokeWidth={2.5} dot={{ r: 3, fill: "#8b5cf6" }} connectNulls name="MTD MQLs" />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -474,6 +480,39 @@ export default function LeadsClient({
                 <Legend />
                 <Line yAxisId="spend" type="monotone" dataKey="cumSpend" stroke="#6B93D8" strokeWidth={2} dot={false} name="MTD spend" />
                 <Line yAxisId="cpl" type="monotone" dataKey="cpl" stroke="#F04E80" strokeWidth={2.5} dot={{ r: 3, fill: "#F04E80" }} connectNulls name="Running CPL" />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* Running Cost per MQL vs Cumulative Spend */}
+      {runningData.length > 0 && hasHubSpot && (
+        <div className="lv-card p-6 mb-8">
+          <h2 className="text-[16px] font-semibold mb-1">MTD Cost per MQL vs MTD Spend</h2>
+          <p className="text-[12px] text-gray-500 mb-4">
+            Each day's cost per MQL = month-to-date spend ÷ month-to-date MQLs. Both reset at the 1st of every month.
+          </p>
+          <div className="h-[300px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={runningData} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="date" tick={{ fontSize: 10 }}
+                  tickFormatter={(v) => { const d = new Date(v + "T00:00:00"); return `${d.getMonth() + 1}/${d.getDate()}`; }} />
+                <YAxis yAxisId="spend" tickFormatter={(v) => `$${v}`} tick={{ fontSize: 11 }} />
+                <YAxis yAxisId="cpm" orientation="right" tickFormatter={(v) => `$${v}`} tick={{ fontSize: 11 }} />
+                <Tooltip
+                  labelFormatter={(v) => { const d = new Date(v + "T00:00:00"); return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); }}
+                  formatter={(value: any, name: string) => {
+                    if (value === null || value === undefined) return ["-", name];
+                    if (name === "MTD spend") return [`$${Number(value).toFixed(0)}`, name];
+                    if (name === "Running cost per MQL") return [`$${Number(value).toFixed(0)}`, name];
+                    return [value, name];
+                  }}
+                />
+                <Legend />
+                <Line yAxisId="spend" type="monotone" dataKey="cumSpend" stroke="#6B93D8" strokeWidth={2} dot={false} name="MTD spend" />
+                <Line yAxisId="cpm" type="monotone" dataKey="cpmql" stroke="#06b6d4" strokeWidth={2.5} dot={{ r: 3, fill: "#06b6d4" }} connectNulls name="Running cost per MQL" />
               </LineChart>
             </ResponsiveContainer>
           </div>
