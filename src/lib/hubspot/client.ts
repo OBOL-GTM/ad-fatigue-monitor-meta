@@ -584,24 +584,26 @@ async function _fetchLiteATM(fromDate: string, toDate: string): Promise<string[]
 }
 
 /**
- * Lite MQL fetch. Counts contacts whose lifecyclestage = "marketingqualifiedlead"
- * AND createdate is in [fromDate, toDate]. Strict native-HubSpot MQL count,
- * skips the ATM-dedupe pass the full getLeadsFunnel does (which makes lite
- * MQL ≥ pureMQL — that's fine for top-level metrics, and avoids the extra
- * batch fetches that make full ~5–10× slower).
+ * Lite MQL fetch. Counts contacts whose hs_lifecyclestage_marketingqualifiedlead_date
+ * (the date the contact became an MQL) falls in [fromDate, toDate]. This matches
+ * the HubSpot native "MQLs by month" report exactly — every contact that ever
+ * reached MQL stage during the window is counted, whether they later progressed
+ * to SQL/Customer or not. Switching off createdate (which only catches contacts
+ * created AND tagged MQL in the same window) was the audit fix on 2026-05-19.
  */
+const MQL_BECAME_DATE_PROP = "hs_lifecyclestage_marketingqualifiedlead_date";
+
 async function _fetchLiteMQL(fromDate: string, toDate: string): Promise<string[]> {
   const fromTs = new Date(fromDate + "T00:00:00Z").getTime();
   const toTs = new Date(toDate + "T23:59:59Z").getTime();
   const searchBody = {
     filterGroups: [{
       filters: [
-        { propertyName: "createdate", operator: "GTE", value: String(fromTs) },
-        { propertyName: "createdate", operator: "LTE", value: String(toTs) },
-        { propertyName: "lifecyclestage", operator: "EQ", value: "marketingqualifiedlead" },
+        { propertyName: MQL_BECAME_DATE_PROP, operator: "GTE", value: String(fromTs) },
+        { propertyName: MQL_BECAME_DATE_PROP, operator: "LTE", value: String(toTs) },
       ],
     }],
-    properties: ["createdate"],
+    properties: [MQL_BECAME_DATE_PROP],
     limit: 100,
   };
   const raw: any[] = [];
@@ -614,8 +616,18 @@ async function _fetchLiteMQL(fromDate: string, toDate: string): Promise<string[]
     raw.push(...(r.results || []));
     after = r.paging?.next?.after;
   } while (after);
-  return Array.from(new Map(raw.map(c => [c.id, (c.properties?.createdate || "").slice(0, 10)])).values())
-    .filter(Boolean);
+  // HubSpot returns datetime values as either ms-timestamp strings or ISO strings.
+  // Normalise to YYYY-MM-DD via parseCompanyDate which already handles both.
+  const dates: string[] = [];
+  const seen = new Set<string>();
+  for (const c of raw) {
+    if (seen.has(c.id)) continue;
+    seen.add(c.id);
+    const value = c.properties?.[MQL_BECAME_DATE_PROP];
+    const d = parseCompanyDate(value);
+    if (d) dates.push(d);
+  }
+  return dates;
 }
 
 async function _fetchLiteSQL(fromDate: string, toDate: string): Promise<string[]> {
