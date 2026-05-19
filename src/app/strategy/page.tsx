@@ -247,16 +247,20 @@ export default async function StrategyPage({
   ]);
   const totalATM = hs?.totalATM ?? 0;
   const totalSQLs = hs?.totalSQLs ?? 0;
-  const totalMQLs = 0;
+  const totalMQLs = hs?.totalMQLs ?? 0;
   // Daily ATM from lite (no per-day sqls — that's derived from dailySQLDeals
   // below, matching the headline deal-based total).
   const hubspotATM = hs?.dailyATM.map(d => ({ date: d.date, atm: d.atm, sqls: 0 })) ?? [];
-  const hubspotMQLs: Array<{ date: string; mqls: number }> = [];
+  const hubspotMQLs: Array<{ date: string; mqls: number }> = hs?.dailyMQLs.map(d => ({ date: d.date, mqls: d.mqls })) ?? [];
   const allLeadContacts: Array<any> = [];
   const costPerDemo = totalATM > 0 ? totalSpend / totalATM : null;
+  const costPerMQL = totalMQLs > 0 ? totalSpend / totalMQLs : null;
   const costPerSQL = totalSQLs > 0 ? totalSpend / totalSQLs : null;
   const demoToSQLRate = totalATM > 0 ? (totalSQLs / totalATM) * 100 : null;
   const clickToLeadRate = totalClicks > 0 ? (totalATM / totalClicks) * 100 : null;
+  // MQL Yes/No share among inbound demos. Cap at 100% since MQL events can
+  // happen on contacts outside the ATM bucket (lite skips the ATM dedupe).
+  const mqlYesShare = totalATM > 0 ? Math.min(100, (totalMQLs / totalATM) * 100) : null;
 
   // PER-CAMPAIGN CPL: join Meta campaign spend to HS ATM counts via utm_campaign.
   // Match is best-effort (normalize: lowercase, strip non-alphanumerics, substring
@@ -522,10 +526,14 @@ export default async function StrategyPage({
     wowSpendByDate.set(m.date, (wowSpendByDate.get(m.date) || 0) + (m.spend ?? 0));
   }
   const wowAtmByDate = new Map<string, number>();
+  const wowMqlsByDate = new Map<string, number>();
   const wowSqlsByDate = new Map<string, number>();
   if (hubspotWoW) {
     for (const d of hubspotWoW.dailyATM) {
       wowAtmByDate.set(d.date, (wowAtmByDate.get(d.date) || 0) + d.atm);
+    }
+    for (const d of hubspotWoW.dailyMQLs) {
+      wowMqlsByDate.set(d.date, (wowMqlsByDate.get(d.date) || 0) + d.mqls);
     }
     for (const d of hubspotWoW.dailySQLDeals) {
       wowSqlsByDate.set(d.date, (wowSqlsByDate.get(d.date) || 0) + d.sqlDeals);
@@ -534,6 +542,7 @@ export default async function StrategyPage({
   const wow = computeWoW({
     dailySpend: wowSpendByDate,
     dailyAtm: wowAtmByDate,
+    dailyMqls: wowMqlsByDate,
     dailySqls: wowSqlsByDate,
     now,
     weeksBack: 8,
@@ -567,6 +576,8 @@ export default async function StrategyPage({
         leadContacts={allLeadContacts.length > 0 ? allLeadContacts : undefined}
         dailyCPL={dailyCPL}
         wow={wow}
+        costPerMQL={costPerMQL !== null ? Math.round(costPerMQL * 100) / 100 : null}
+        mqlYesShare={mqlYesShare !== null ? Math.round(mqlYesShare * 10) / 10 : null}
       />
 
       {/* Analytics section */}

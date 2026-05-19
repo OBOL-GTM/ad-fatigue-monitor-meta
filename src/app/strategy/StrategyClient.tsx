@@ -226,13 +226,15 @@ export default function StrategyClient({
               </p>
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 mb-6">
             {[
               { label: "Spend", value: formatCurrency(wow.thisWeek.spend), delta: wow.deltas.spend, color: "#6B93D8" },
               { label: "Inbounds", value: wow.thisWeek.atm.toLocaleString(), delta: wow.deltas.atm, color: "#D06AB8" },
+              { label: "MQLs", value: wow.thisWeek.mqls.toLocaleString(), delta: wow.deltas.mqls, color: "#8b5cf6" },
               { label: "SQLs", value: wow.thisWeek.sqls.toLocaleString(), delta: wow.deltas.sqls, color: "#06b6d4" },
               { label: "CPL", value: wow.thisWeek.cpl != null ? formatCurrency(wow.thisWeek.cpl) : "-", delta: wow.deltas.cpl, color: "#F04E80", invertDelta: true },
-              { label: "Cost per SQL", value: wow.thisWeek.costPerSql != null ? formatCurrency(wow.thisWeek.costPerSql) : "-", delta: wow.deltas.costPerSql, color: "#8b5cf6", invertDelta: true },
+              { label: "Cost per MQL", value: wow.thisWeek.cpmql != null ? formatCurrency(wow.thisWeek.cpmql) : "-", delta: wow.deltas.cpmql, color: "#06b6d4", invertDelta: true },
+              { label: "Cost per SQL", value: wow.thisWeek.costPerSql != null ? formatCurrency(wow.thisWeek.costPerSql) : "-", delta: wow.deltas.costPerSql, color: "#9B7ED0", invertDelta: true },
             ].map(c => {
               const isNeutral = c.delta == null || Math.abs(c.delta) < 0.5;
               const isPositive = c.delta != null && (c.invertDelta ? c.delta < 0 : c.delta > 0);
@@ -271,8 +273,10 @@ export default function StrategyClient({
                     <Legend wrapperStyle={{ fontSize: "12px" }} />
                     <Line yAxisId="left" type="monotone" dataKey="spend" name="Spend" stroke="#6B93D8" strokeWidth={2} dot={{ r: 3 }} />
                     <Line yAxisId="right" type="monotone" dataKey="atm" name="Inbounds" stroke="#D06AB8" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line yAxisId="right" type="monotone" dataKey="mqls" name="MQLs" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3 }} />
                     <Line yAxisId="right" type="monotone" dataKey="sqls" name="SQLs" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3 }} />
                     <Line yAxisId="left" type="monotone" dataKey="cpl" name="CPL" stroke="#F04E80" strokeWidth={2.5} strokeDasharray="4 2" dot={{ r: 2.5, fill: "#F04E80" }} connectNulls />
+                    <Line yAxisId="left" type="monotone" dataKey="cpmql" name="Cost per MQL" stroke="#06b6d4" strokeWidth={2} strokeDasharray="4 2" dot={{ r: 2.5, fill: "#06b6d4" }} connectNulls />
                   </LineChart>
                 </ResponsiveContainer>
               </div>

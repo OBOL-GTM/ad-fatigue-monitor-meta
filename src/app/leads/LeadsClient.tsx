@@ -41,6 +41,8 @@ interface Props {
   leadContacts?: LeadContact[];
   dailyCPL?: DailyCPL[];
   wow?: WoWData;
+  costPerMQL?: number | null;
+  mqlYesShare?: number | null;
 }
 
 function formatNum(n: number): string {
@@ -58,6 +60,7 @@ export default function LeadsClient({
   dailyData, campaignBreakdown, rangeFrom, rangeTo, activeAdCount,
   hubspotATM, hubspotMQLs, totalATM, totalSQLs, totalMQLs,
   campaignNames, dailyByCampaign, leadContacts, dailyCPL, wow,
+  costPerMQL, mqlYesShare,
 }: Props) {
   const router = useRouter();
   const [from, setFrom] = useState(rangeFrom);
@@ -221,13 +224,18 @@ export default function LeadsClient({
               <span className="pointer-events-none">Refresh HubSpot</span>
             </button>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
             <button onClick={() => setDrillDown(drillDown === "atm" ? null : "atm")}
               className={`cursor-pointer text-left lv-card p-4 transition-all ${drillDown === "atm" ? "ring-2 ring-[#D06AB8]" : "hover:shadow-md"}`}>
               <div className="text-2xl font-bold text-[#D06AB8]">{totalATM ?? 0}</div>
               <div className="text-[12px] text-gray-500 mt-1">Inbound Leads</div>
               <div className="text-[10px] text-gray-400">ATM / Demos Booked</div>
             </button>
+            <div className="lv-card p-4">
+              <div className="text-2xl font-bold text-[#8b5cf6]">{totalMQLs ?? 0}</div>
+              <div className="text-[12px] text-gray-500 mt-1">MQLs</div>
+              <div className="text-[10px] text-gray-400">Marketing-qualified</div>
+            </div>
             <button onClick={() => setDrillDown(drillDown === "sql" ? null : "sql")}
               className={`cursor-pointer text-left lv-card p-4 transition-all ${drillDown === "sql" ? "ring-2 ring-[#06b6d4]" : "hover:shadow-md"}`}>
               <div className="text-2xl font-bold text-[#06b6d4]">{totalSQLs ?? 0}</div>
@@ -235,6 +243,7 @@ export default function LeadsClient({
               <div className="text-[10px] text-gray-400">Qualified</div>
             </button>
             <StatCard label="CPL" value={cplATM ? `$${cplATM.toFixed(2)}` : "-"} color="#D06AB8" subtitle="per Inbound Lead" />
+            <StatCard label="Cost per MQL" value={costPerMQL ? `$${costPerMQL.toFixed(2)}` : "-"} color="#8b5cf6" />
             <StatCard label="Cost per SQL" value={costPerSQL ? `$${costPerSQL.toFixed(2)}` : "-"} color="#F04E80" />
           </div>
 
@@ -315,6 +324,70 @@ export default function LeadsClient({
         </div>
       )}
 
+      {/* MQL yes/no distribution + daily MQL trend (mirrors HubSpot inbound dashboard) */}
+      {hasHubSpot && totalATM != null && totalATM > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <div className="lv-card p-6">
+            <h2 className="text-[16px] font-semibold mb-1">MQL distribution</h2>
+            <p className="text-[12px] text-gray-500 mb-4">Of inbound demos this period, how many are marketing-qualified.</p>
+            <div className="h-[260px] flex items-center justify-center">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={[
+                      { name: "MQL Yes", value: Math.min(totalMQLs ?? 0, totalATM), fill: "#8b5cf6" },
+                      { name: "MQL No", value: Math.max(0, totalATM - (totalMQLs ?? 0)), fill: "#e5e7eb" },
+                    ]}
+                    cx="50%" cy="50%" innerRadius={60} outerRadius={100}
+                    paddingAngle={2} dataKey="value" nameKey="name"
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    labelLine={{ stroke: "#9ca3af", strokeWidth: 1 }}
+                  >
+                    <Cell fill="#8b5cf6" />
+                    <Cell fill="#e5e7eb" />
+                  </Pie>
+                  <Tooltip formatter={(value: number) => `${value} contacts`} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="text-center text-[12px] text-gray-500 mt-2">
+              {mqlYesShare != null ? `${mqlYesShare.toFixed(1)}% of inbounds reached MQL` : "-"}
+            </div>
+          </div>
+          <div className="lv-card p-6">
+            <h2 className="text-[16px] font-semibold mb-1">Daily MQLs vs spend</h2>
+            <p className="text-[12px] text-gray-500 mb-4">Marketing-qualified leads by create date, alongside daily ad spend.</p>
+            <div className="h-[260px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart
+                  data={(() => {
+                    const mqlMap = new Map((hubspotMQLs ?? []).map(d => [d.date, d.mqls]));
+                    return dailyData.map(d => ({ date: d.date, spend: d.spend, mqls: mqlMap.get(d.date) || 0 }));
+                  })()}
+                  margin={{ top: 10, right: 20, bottom: 20, left: 10 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }}
+                    tickFormatter={(v) => { const d = new Date(v + "T00:00:00"); return `${d.getMonth() + 1}/${d.getDate()}`; }} />
+                  <YAxis yAxisId="spend" tickFormatter={(v) => `$${v}`} tick={{ fontSize: 11 }} />
+                  <YAxis yAxisId="mqls" orientation="right" allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <Tooltip
+                    labelFormatter={(v) => { const d = new Date(v + "T00:00:00"); return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); }}
+                    formatter={(value: any, name: string) => {
+                      if (name === "Spend") return [`$${Number(value).toFixed(0)}`, name];
+                      return [`${Number(value)} MQL${Number(value) === 1 ? "" : "s"}`, name];
+                    }}
+                  />
+                  <Legend />
+                  <Line yAxisId="spend" type="monotone" dataKey="spend" stroke="#6B93D8" strokeWidth={2} dot={false} name="Spend" />
+                  <Line yAxisId="mqls" type="monotone" dataKey="mqls" stroke="#8b5cf6" strokeWidth={2.5} dot={{ r: 3, fill: "#8b5cf6" }} name="MQLs" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Week-over-week, always rolling last 7 days vs prior 7 days */}
       {wow && (
         <div className="lv-card p-6 mb-8 bg-gradient-to-br from-[#6B93D8]/5 via-[#9B7ED0]/5 to-[#D06AB8]/5">
@@ -326,12 +399,14 @@ export default function LeadsClient({
               </p>
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
             <WoWStatCard label="Ad spend" value={`$${wow.thisWeek.spend.toLocaleString("en-US", { maximumFractionDigits: 0 })}`} delta={wow.deltas.spend} color="#6B93D8" />
             <WoWStatCard label="Inbounds" value={wow.thisWeek.atm.toLocaleString()} delta={wow.deltas.atm} color="#D06AB8" />
+            <WoWStatCard label="MQLs" value={wow.thisWeek.mqls.toLocaleString()} delta={wow.deltas.mqls} color="#8b5cf6" />
             <WoWStatCard label="SQLs" value={wow.thisWeek.sqls.toLocaleString()} delta={wow.deltas.sqls} color="#06b6d4" />
             <WoWStatCard label="CPL" value={wow.thisWeek.cpl != null ? `$${wow.thisWeek.cpl.toFixed(2)}` : "-"} delta={wow.deltas.cpl} invertDelta color="#F04E80" />
-            <WoWStatCard label="Cost per SQL" value={wow.thisWeek.costPerSql != null ? `$${wow.thisWeek.costPerSql.toFixed(2)}` : "-"} delta={wow.deltas.costPerSql} invertDelta color="#8b5cf6" />
+            <WoWStatCard label="Cost per MQL" value={wow.thisWeek.cpmql != null ? `$${wow.thisWeek.cpmql.toFixed(2)}` : "-"} delta={wow.deltas.cpmql} invertDelta color="#06b6d4" />
+            <WoWStatCard label="Cost per SQL" value={wow.thisWeek.costPerSql != null ? `$${wow.thisWeek.costPerSql.toFixed(2)}` : "-"} delta={wow.deltas.costPerSql} invertDelta color="#9B7ED0" />
           </div>
 
           {/* 8-week weekly trend chart */}
@@ -356,8 +431,10 @@ export default function LeadsClient({
                     <Legend />
                     <Line yAxisId="left" type="monotone" dataKey="spend" stroke="#6B93D8" strokeWidth={2} dot={{ r: 3 }} name="Spend" />
                     <Line yAxisId="right" type="monotone" dataKey="atm" stroke="#D06AB8" strokeWidth={2} dot={{ r: 3 }} name="Inbounds" />
+                    <Line yAxisId="right" type="monotone" dataKey="mqls" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3 }} name="MQLs" />
                     <Line yAxisId="right" type="monotone" dataKey="sqls" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3 }} name="SQLs" />
                     <Line yAxisId="left" type="monotone" dataKey="cpl" stroke="#F04E80" strokeWidth={2.5} strokeDasharray="4 2" dot={{ r: 2.5, fill: "#F04E80" }} connectNulls name="CPL" />
+                    <Line yAxisId="left" type="monotone" dataKey="cpmql" stroke="#06b6d4" strokeWidth={2} strokeDasharray="4 2" dot={{ r: 2.5, fill: "#06b6d4" }} connectNulls name="Cost per MQL" />
                   </LineChart>
                 </ResponsiveContainer>
               </div>

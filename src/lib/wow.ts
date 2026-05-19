@@ -14,8 +14,10 @@ import { format, subDays } from "date-fns";
 export type WeekTotals = {
   spend: number;
   atm: number;
+  mqls: number;
   sqls: number;
   cpl: number | null;
+  cpmql: number | null;
   costPerSql: number | null;
 };
 
@@ -25,8 +27,10 @@ export type WoWData = {
   deltas: {
     spend: number | null;
     atm: number | null;
+    mqls: number | null;
     sqls: number | null;
     cpl: number | null;
+    cpmql: number | null;
     costPerSql: number | null;
   };
   thisWeekLabel: string;
@@ -36,8 +40,10 @@ export type WoWData = {
     label: string;
     spend: number;
     atm: number;
+    mqls: number;
     sqls: number;
     cpl: number | null;
+    cpmql: number | null;
     costPerSql: number | null;
   }>;
 };
@@ -58,29 +64,35 @@ function shortRangeLabel(start: Date, end: Date): string {
 export function computeWoW({
   dailySpend,
   dailyAtm,
+  dailyMqls,
   dailySqls,
   now,
   weeksBack = 8,
 }: {
   dailySpend: Map<string, number>;
   dailyAtm: Map<string, number>;
+  dailyMqls?: Map<string, number>;
   dailySqls: Map<string, number>;
   now: Date;
   weeksBack?: number;
 }): WoWData {
+  const mqlMap = dailyMqls ?? new Map<string, number>();
   const sumWindow = (start: Date, end: Date): WeekTotals => {
-    let spend = 0, atm = 0, sqls = 0;
+    let spend = 0, atm = 0, mqls = 0, sqls = 0;
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       const key = format(d, "yyyy-MM-dd");
       spend += dailySpend.get(key) || 0;
       atm += dailyAtm.get(key) || 0;
+      mqls += mqlMap.get(key) || 0;
       sqls += dailySqls.get(key) || 0;
     }
     return {
       spend: Math.round(spend * 100) / 100,
       atm,
+      mqls,
       sqls,
       cpl: atm > 0 ? Math.round((spend / atm) * 100) / 100 : null,
+      cpmql: mqls > 0 ? Math.round((spend / mqls) * 100) / 100 : null,
       costPerSql: sqls > 0 ? Math.round((spend / sqls) * 100) / 100 : null,
     };
   };
@@ -97,10 +109,15 @@ export function computeWoW({
   const deltas = {
     spend: pctDelta(thisWeek.spend, lastWeek.spend),
     atm: pctDelta(thisWeek.atm, lastWeek.atm),
+    mqls: pctDelta(thisWeek.mqls, lastWeek.mqls),
     sqls: pctDelta(thisWeek.sqls, lastWeek.sqls),
     cpl:
       thisWeek.cpl != null && lastWeek.cpl != null
         ? pctDelta(thisWeek.cpl, lastWeek.cpl)
+        : null,
+    cpmql:
+      thisWeek.cpmql != null && lastWeek.cpmql != null
+        ? pctDelta(thisWeek.cpmql, lastWeek.cpmql)
         : null,
     costPerSql:
       thisWeek.costPerSql != null && lastWeek.costPerSql != null

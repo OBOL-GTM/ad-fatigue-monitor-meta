@@ -114,6 +114,7 @@ export default async function PublicExecutivePage({
     monthEnd: Date;
     spend: number;
     atm: number;
+    mqls: number;
     sqls: number;
   };
   const buckets: MonthBucket[] = [];
@@ -127,6 +128,7 @@ export default async function PublicExecutivePage({
       monthEnd: endOfMonth(cursor),
       spend: 0,
       atm: 0,
+      mqls: 0,
       sqls: 0,
     });
     cursor = addMonths(cursor, 1);
@@ -143,6 +145,11 @@ export default async function PublicExecutivePage({
       const d = new Date(day.date + "T00:00:00");
       const bucket = buckets.find(b => d >= b.monthStart && d <= b.monthEnd);
       if (bucket) bucket.atm += day.atm;
+    }
+    for (const day of hubspotResult.dailyMQLs) {
+      const d = new Date(day.date + "T00:00:00");
+      const bucket = buckets.find(b => d >= b.monthStart && d <= b.monthEnd);
+      if (bucket) bucket.mqls += day.mqls;
     }
     for (const day of hubspotResult.dailySQLDeals) {
       const d = new Date(day.date + "T00:00:00");
@@ -165,44 +172,54 @@ export default async function PublicExecutivePage({
 
   const thisSpendVal = thisMonth?.spend ?? 0;
   const thisATMVal = thisMonth?.atm ?? 0;
+  const thisMQLsVal = thisMonth?.mqls ?? 0;
   const thisSQLsVal = thisMonth?.sqls ?? 0;
   const thisCPLVal = thisATMVal > 0 ? Math.round((thisSpendVal / thisATMVal) * 100) / 100 : null;
+  const thisCPMQLVal = thisMQLsVal > 0 ? Math.round((thisSpendVal / thisMQLsVal) * 100) / 100 : null;
   const lastSpend = lastMonth?.spend ?? 0;
   const lastATM = lastMonth?.atm ?? 0;
+  const lastMQLs = lastMonth?.mqls ?? 0;
   const lastSQLs = lastMonth?.sqls ?? 0;
   const lastCPL = lastATM > 0 ? Math.round((lastSpend / lastATM) * 100) / 100 : null;
+  const lastCPMQL = lastMQLs > 0 ? Math.round((lastSpend / lastMQLs) * 100) / 100 : null;
   const momDeltas = {
     spend: pctDelta(thisSpendVal, lastSpend),
     atm: pctDelta(thisATMVal, lastATM),
+    mqls: pctDelta(thisMQLsVal, lastMQLs),
     sqls: pctDelta(thisSQLsVal, lastSQLs),
     cpl: lastCPL && thisCPLVal ? pctDelta(thisCPLVal, lastCPL) : null,
+    cpmql: lastCPMQL && thisCPMQLVal ? pctDelta(thisCPMQLVal, lastCPMQL) : null,
   };
 
   const rangeTotals = buckets.reduce(
     (acc, b) => ({
       spend: acc.spend + b.spend,
       atm: acc.atm + b.atm,
+      mqls: acc.mqls + b.mqls,
       sqls: acc.sqls + b.sqls,
     }),
-    { spend: 0, atm: 0, sqls: 0 }
+    { spend: 0, atm: 0, mqls: 0, sqls: 0 }
   );
   const rangeCPL = rangeTotals.atm > 0 ? Math.round((rangeTotals.spend / rangeTotals.atm) * 100) / 100 : null;
+  const rangeCPMQL = rangeTotals.mqls > 0 ? Math.round((rangeTotals.spend / rangeTotals.mqls) * 100) / 100 : null;
   const rangeCostPerSQL = rangeTotals.sqls > 0 ? Math.round((rangeTotals.spend / rangeTotals.sqls) * 100) / 100 : null;
 
   // When the user selects a range other than "this-month", stat cards should
   // reflect the selected range, not the hardcoded current month.
   const isThisMonthPreset = preset === "this-month";
   const cardData = isThisMonthPreset
-    ? { spend: thisSpendVal, atm: thisATMVal, sqls: thisSQLsVal, cpl: thisCPLVal }
+    ? { spend: thisSpendVal, atm: thisATMVal, mqls: thisMQLsVal, sqls: thisSQLsVal, cpl: thisCPLVal, cpmql: thisCPMQLVal }
     : {
         spend: Math.round(rangeTotals.spend * 100) / 100,
         atm: rangeTotals.atm,
+        mqls: rangeTotals.mqls,
         sqls: rangeTotals.sqls,
         cpl: rangeCPL,
+        cpmql: rangeCPMQL,
       };
   const cardDeltas = isThisMonthPreset
     ? momDeltas
-    : { spend: null, atm: null, sqls: null, cpl: null };
+    : { spend: null, atm: null, mqls: null, sqls: null, cpl: null, cpmql: null };
 
   const adStatsMap = new Map<string, { spend: number; conversions: number }>();
   for (const m of metrics) {
@@ -292,16 +309,20 @@ export default async function PublicExecutivePage({
         rangeTotals={{
           spend: Math.round(rangeTotals.spend * 100) / 100,
           atm: rangeTotals.atm,
+          mqls: rangeTotals.mqls,
           sqls: rangeTotals.sqls,
           cpl: rangeCPL,
+          cpmql: rangeCPMQL,
           costPerSQL: rangeCostPerSQL,
         }}
         trend={buckets.map(b => ({
           label: b.label,
           spend: b.spend,
           atm: b.atm,
+          mqls: b.mqls,
           sqls: b.sqls,
           cpl: b.atm > 0 ? Math.round((b.spend / b.atm) * 100) / 100 : 0,
+          cpmql: b.mqls > 0 ? Math.round((b.spend / b.mqls) * 100) / 100 : 0,
           costPerSQL: b.sqls > 0 ? Math.round((b.spend / b.sqls) * 100) / 100 : 0,
           sqlRate: b.atm > 0 ? Math.round((b.sqls / b.atm) * 1000) / 10 : 0,
         }))}
@@ -311,37 +332,44 @@ export default async function PublicExecutivePage({
             spendByDate.set(m.date, (spendByDate.get(m.date) || 0) + (m.spend ?? 0));
           }
           const atmByDate = new Map<string, number>();
+          const mqlByDate = new Map<string, number>();
           const sqlByDate = new Map<string, number>();
           if (hubspotResult) {
             for (const d of hubspotResult.dailyATM) atmByDate.set(d.date, (atmByDate.get(d.date) || 0) + d.atm);
+            for (const d of hubspotResult.dailyMQLs) mqlByDate.set(d.date, (mqlByDate.get(d.date) || 0) + d.mqls);
             for (const d of hubspotResult.dailySQLDeals) sqlByDate.set(d.date, (sqlByDate.get(d.date) || 0) + d.sqlDeals);
           }
           const allDates = Array.from(new Set<string>([
-            ...spendByDate.keys(), ...atmByDate.keys(), ...sqlByDate.keys(),
+            ...spendByDate.keys(), ...atmByDate.keys(), ...mqlByDate.keys(), ...sqlByDate.keys(),
           ])).sort();
-          let cumSpend = 0, cumAtm = 0, cumSqls = 0;
+          let cumSpend = 0, cumAtm = 0, cumMqls = 0, cumSqls = 0;
           let lastCPL: number | null = null;
+          let lastCPMQL: number | null = null;
           let lastCostPerSQL: number | null = null;
           let currentMonth = "";
-          const out: Array<{ date: string; cumSpend: number; cumAtm: number; cumSqls: number; cpl: number | null; costPerSql: number | null }> = [];
+          const out: Array<{ date: string; cumSpend: number; cumAtm: number; cumMqls: number; cumSqls: number; cpl: number | null; cpmql: number | null; costPerSql: number | null }> = [];
           for (const date of allDates) {
             const monthKey = date.slice(0, 7);
             if (monthKey !== currentMonth) {
               currentMonth = monthKey;
-              cumSpend = 0; cumAtm = 0; cumSqls = 0;
-              lastCPL = null; lastCostPerSQL = null;
+              cumSpend = 0; cumAtm = 0; cumMqls = 0; cumSqls = 0;
+              lastCPL = null; lastCPMQL = null; lastCostPerSQL = null;
             }
             cumSpend += spendByDate.get(date) || 0;
             cumAtm += atmByDate.get(date) || 0;
+            cumMqls += mqlByDate.get(date) || 0;
             cumSqls += sqlByDate.get(date) || 0;
             if (cumAtm > 0) lastCPL = Math.round((cumSpend / cumAtm) * 100) / 100;
+            if (cumMqls > 0) lastCPMQL = Math.round((cumSpend / cumMqls) * 100) / 100;
             if (cumSqls > 0) lastCostPerSQL = Math.round((cumSpend / cumSqls) * 100) / 100;
             out.push({
               date,
               cumSpend: Math.round(cumSpend * 100) / 100,
               cumAtm,
+              cumMqls,
               cumSqls,
               cpl: lastCPL,
+              cpmql: lastCPMQL,
               costPerSql: lastCostPerSQL,
             });
           }
@@ -351,8 +379,10 @@ export default async function PublicExecutivePage({
           label: b.label,
           spend: b.spend,
           atm: b.atm,
+          mqls: b.mqls,
           sqls: b.sqls,
           cpl: b.atm > 0 ? Math.round((b.spend / b.atm) * 100) / 100 : 0,
+          cpmql: b.mqls > 0 ? Math.round((b.spend / b.mqls) * 100) / 100 : 0,
           costPerSQL: b.sqls > 0 ? Math.round((b.spend / b.sqls) * 100) / 100 : 0,
         }))}
         topCampaigns={topCampaigns}

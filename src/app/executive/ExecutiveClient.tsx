@@ -30,8 +30,10 @@ type MonthRow = {
   label: string;
   spend: number;
   atm: number;
+  mqls: number;
   sqls: number;
   cpl: number;
+  cpmql: number;
   costPerSQL: number;
 };
 
@@ -45,20 +47,24 @@ type Props = {
   rangeTo: string;
   preset: string;
   presets: Record<string, { from: string; to: string }>;
-  thisMonth: { spend: number; atm: number; sqls: number; cpl: number | null };
+  thisMonth: { spend: number; atm: number; mqls: number; sqls: number; cpl: number | null; cpmql: number | null };
   lastMonthLabel: string;
   comparisonLabel?: string;
   deltas: {
     spend: number | null;
     atm: number | null;
+    mqls: number | null;
     sqls: number | null;
     cpl: number | null;
+    cpmql: number | null;
   };
   rangeTotals: {
     spend: number;
     atm: number;
+    mqls: number;
     sqls: number;
     cpl: number | null;
+    cpmql: number | null;
     costPerSQL: number | null;
   };
   trend: TrendRow[];
@@ -70,8 +76,10 @@ type Props = {
     date: string;
     cumSpend: number;
     cumAtm: number;
+    cumMqls: number;
     cumSqls: number;
     cpl: number | null;
+    cpmql: number | null;
     costPerSql: number | null;
   }>;
   wow?: WoWData;
@@ -193,7 +201,7 @@ export default function ExecutiveClient({
       {/* Range-wide totals (the headline for the entire selected period) */}
       <div className="lv-card p-6 mb-6 bg-gradient-to-br from-[#6B93D8]/10 via-[#9B7ED0]/10 to-[#D06AB8]/10">
         <div className="text-[12px] uppercase tracking-wide text-muted-foreground font-medium mb-3">Period totals</div>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
           <div>
             <div className="text-[11px] text-muted-foreground uppercase tracking-wide">Ad spend</div>
             <div className="text-[22px] font-bold text-foreground tabular-nums">{formatMoney(rangeTotals.spend)}</div>
@@ -203,12 +211,20 @@ export default function ExecutiveClient({
             <div className="text-[22px] font-bold text-foreground tabular-nums">{rangeTotals.atm.toLocaleString()}</div>
           </div>
           <div>
+            <div className="text-[11px] text-muted-foreground uppercase tracking-wide">MQLs</div>
+            <div className="text-[22px] font-bold text-foreground tabular-nums">{rangeTotals.mqls.toLocaleString()}</div>
+          </div>
+          <div>
             <div className="text-[11px] text-muted-foreground uppercase tracking-wide">SQLs</div>
             <div className="text-[22px] font-bold text-foreground tabular-nums">{rangeTotals.sqls.toLocaleString()}</div>
           </div>
           <div>
             <div className="text-[11px] text-muted-foreground uppercase tracking-wide">Cost per lead</div>
             <div className="text-[22px] font-bold text-foreground tabular-nums">{rangeTotals.cpl != null ? formatMoney(rangeTotals.cpl) : "-"}</div>
+          </div>
+          <div>
+            <div className="text-[11px] text-muted-foreground uppercase tracking-wide">Cost per MQL</div>
+            <div className="text-[22px] font-bold text-foreground tabular-nums">{rangeTotals.cpmql != null ? formatMoney(rangeTotals.cpmql) : "-"}</div>
           </div>
           <div>
             <div className="text-[11px] text-muted-foreground uppercase tracking-wide">Cost per SQL</div>
@@ -226,11 +242,13 @@ export default function ExecutiveClient({
           <div className="text-[12px] text-muted-foreground">Compared to {lastMonthLabel}</div>
         )}
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
         <StatCard label="Ad spend" value={formatMoney(thisMonth.spend)} delta={deltas.spend} comparisonLabel={comparisonLabel} />
         <StatCard label="Demos booked" value={thisMonth.atm.toLocaleString()} delta={deltas.atm} comparisonLabel={comparisonLabel} />
+        <StatCard label="MQLs" value={thisMonth.mqls.toLocaleString()} delta={deltas.mqls} comparisonLabel={comparisonLabel} />
         <StatCard label="SQLs" value={thisMonth.sqls.toLocaleString()} delta={deltas.sqls} comparisonLabel={comparisonLabel} />
         <StatCard label="Cost per lead" value={thisMonth.cpl != null ? formatMoney(thisMonth.cpl) : "-"} delta={deltas.cpl} invertDelta comparisonLabel={comparisonLabel} />
+        <StatCard label="Cost per MQL" value={thisMonth.cpmql != null ? formatMoney(thisMonth.cpmql) : "-"} delta={deltas.cpmql} invertDelta comparisonLabel={comparisonLabel} />
       </div>
 
       {/* WoW: this week vs last week, always anchored on today */}
@@ -244,11 +262,13 @@ export default function ExecutiveClient({
               Compared to last week ({wow.lastWeekLabel})
             </div>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4 mb-8">
             <StatCard label="Ad spend" value={formatMoney(wow.thisWeek.spend)} delta={wow.deltas.spend} comparisonLabel="WoW" />
             <StatCard label="Inbounds" value={wow.thisWeek.atm.toLocaleString()} delta={wow.deltas.atm} comparisonLabel="WoW" />
+            <StatCard label="MQLs" value={wow.thisWeek.mqls.toLocaleString()} delta={wow.deltas.mqls} comparisonLabel="WoW" />
             <StatCard label="SQLs" value={wow.thisWeek.sqls.toLocaleString()} delta={wow.deltas.sqls} comparisonLabel="WoW" />
             <StatCard label="CPL" value={wow.thisWeek.cpl != null ? formatMoney(wow.thisWeek.cpl) : "-"} delta={wow.deltas.cpl} invertDelta comparisonLabel="WoW" />
+            <StatCard label="Cost per MQL" value={wow.thisWeek.cpmql != null ? formatMoney(wow.thisWeek.cpmql) : "-"} delta={wow.deltas.cpmql} invertDelta comparisonLabel="WoW" />
             <StatCard label="Cost per SQL" value={wow.thisWeek.costPerSql != null ? formatMoney(wow.thisWeek.costPerSql) : "-"} delta={wow.deltas.costPerSql} invertDelta comparisonLabel="WoW" />
           </div>
 
@@ -277,8 +297,10 @@ export default function ExecutiveClient({
                     <Legend wrapperStyle={{ fontSize: "12px" }} />
                     <Line yAxisId="left" type="monotone" dataKey="spend" name="Spend" stroke="#6B93D8" strokeWidth={2} dot={{ r: 3 }} />
                     <Line yAxisId="right" type="monotone" dataKey="atm" name="Inbounds" stroke="#9B7ED0" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line yAxisId="right" type="monotone" dataKey="mqls" name="MQLs" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3 }} />
                     <Line yAxisId="right" type="monotone" dataKey="sqls" name="SQLs" stroke="#D06AB8" strokeWidth={2} dot={{ r: 3 }} />
                     <Line yAxisId="left" type="monotone" dataKey="cpl" name="CPL" stroke="#F04E80" strokeWidth={2.5} strokeDasharray="4 2" dot={{ r: 2.5, fill: "#F04E80" }} connectNulls />
+                    <Line yAxisId="left" type="monotone" dataKey="cpmql" name="CPMQL" stroke="#06b6d4" strokeWidth={2} strokeDasharray="4 2" dot={{ r: 2.5, fill: "#06b6d4" }} connectNulls />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -308,6 +330,7 @@ export default function ExecutiveClient({
                 <Legend wrapperStyle={{ fontSize: "12px" }} />
                 <Line yAxisId="left" type="monotone" dataKey="spend" name="Spend" stroke="#6B93D8" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
                 <Line yAxisId="right" type="monotone" dataKey="atm" name="Demos booked" stroke="#9B7ED0" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                <Line yAxisId="right" type="monotone" dataKey="mqls" name="MQLs" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
                 <Line yAxisId="right" type="monotone" dataKey="sqls" name="SQLs" stroke="#D06AB8" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
               </LineChart>
             </ResponsiveContainer>
@@ -439,7 +462,7 @@ export default function ExecutiveClient({
         </div>
       )}
 
-      {/* Efficiency charts, CPL + Cost per SQL + SQL rate */}
+      {/* Efficiency charts, CPL + Cost per MQL + Cost per SQL + SQL rate */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
         <div className="lv-card p-6">
           <div className="mb-4">
@@ -457,6 +480,26 @@ export default function ExecutiveClient({
                   formatter={(value: any) => [formatMoney(Number(value)), "Cost per lead"]}
                 />
                 <Line type="monotone" dataKey="cpl" stroke="#F04E80" strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+        <div className="lv-card p-6">
+          <div className="mb-4">
+            <h2 className="text-[15px] font-semibold text-foreground">Cost per MQL over time</h2>
+            <p className="text-[12px] text-muted-foreground">Meta spend ÷ marketing-qualified leads. Lower is better.</p>
+          </div>
+          <div style={{ width: "100%", height: 220 }}>
+            <ResponsiveContainer>
+              <LineChart data={trend} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#6b7280" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: "#6b7280" }} axisLine={false} tickLine={false} width={50} tickFormatter={(v) => formatMoney(Number(v))} />
+                <Tooltip
+                  contentStyle={{ background: "white", border: "1px solid #e5e7eb", borderRadius: "8px", fontSize: "12px" }}
+                  formatter={(value: any) => [formatMoney(Number(value)), "Cost per MQL"]}
+                />
+                <Line type="monotone" dataKey="cpmql" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -515,14 +558,16 @@ export default function ExecutiveClient({
           <h2 className="text-[15px] font-semibold text-foreground">Month-by-month summary</h2>
           <p className="text-[12px] text-muted-foreground">Full detail for export / sharing.</p>
         </div>
-        <table className="w-full min-w-[600px] text-[13px]">
+        <table className="w-full min-w-[700px] text-[13px]">
           <thead>
             <tr className="border-b border-border text-left">
               <th className="pb-2 pr-4 font-medium text-muted-foreground">Month</th>
               <th className="pb-2 pr-4 font-medium text-muted-foreground text-right">Spend</th>
               <th className="pb-2 pr-4 font-medium text-muted-foreground text-right">Demos</th>
+              <th className="pb-2 pr-4 font-medium text-muted-foreground text-right">MQLs</th>
               <th className="pb-2 pr-4 font-medium text-muted-foreground text-right">SQLs</th>
               <th className="pb-2 pr-4 font-medium text-muted-foreground text-right">Cost / demo</th>
+              <th className="pb-2 pr-4 font-medium text-muted-foreground text-right">Cost / MQL</th>
               <th className="pb-2 font-medium text-muted-foreground text-right">Cost / SQL</th>
             </tr>
           </thead>
@@ -532,8 +577,10 @@ export default function ExecutiveClient({
                 <td className="py-2 pr-4 font-medium text-foreground">{row.label}</td>
                 <td className="py-2 pr-4 text-right tabular-nums">{formatMoney(row.spend)}</td>
                 <td className="py-2 pr-4 text-right tabular-nums">{row.atm.toLocaleString()}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{row.mqls.toLocaleString()}</td>
                 <td className="py-2 pr-4 text-right tabular-nums">{row.sqls.toLocaleString()}</td>
                 <td className="py-2 pr-4 text-right tabular-nums">{row.atm > 0 ? formatMoney(row.cpl) : "-"}</td>
+                <td className="py-2 pr-4 text-right tabular-nums">{row.mqls > 0 ? formatMoney(row.cpmql) : "-"}</td>
                 <td className="py-2 text-right tabular-nums">{row.sqls > 0 ? formatMoney(row.costPerSQL) : "-"}</td>
               </tr>
             ))}

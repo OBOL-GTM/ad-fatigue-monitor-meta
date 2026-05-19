@@ -229,8 +229,10 @@ export async function getLeadsFunnelLite(
 ): Promise<{
   dailyATM: { date: string; atm: number }[];
   dailySQLDeals: { date: string; sqlDeals: number }[];
+  dailyMQLs: { date: string; mqls: number }[];
   totalATM: number;
   totalSQLs: number;
+  totalMQLs: number;
 }> {
   return cached(`lite:${fromDate}:${toDate}`, HUBSPOT_CACHE_TTL_MS, () =>
     _getLeadsFunnelLiteUncached(fromDate, toDate),
@@ -260,10 +262,12 @@ async function _getLeadsFunnelLiteUncached(
     cur = nextMonth;
   }
 
-  // Run each half (ATM companies + SQL deals) as its own independent promise
-  // per slice, so a failure on one side doesn't lose the other month's data.
+  // Run each leg (ATM companies + SQL deals + MQL contacts) as its own
+  // independent promise per slice, so a failure on one leg doesn't lose
+  // the other legs' data for that month.
   const allAtmDates: string[] = [];
   const allSqlDates: string[] = [];
+  const allMqlDates: string[] = [];
   await Promise.all(
     slices.flatMap(([sliceFrom, sliceTo]) => [
       _fetchLiteATM(sliceFrom, sliceTo)
@@ -275,6 +279,11 @@ async function _getLeadsFunnelLiteUncached(
         .then((d) => { allSqlDates.push(...d); })
         .catch((err) => {
           console.error(`[hubspot-lite] SQL slice ${sliceFrom}→${sliceTo} failed:`, err);
+        }),
+      _fetchLiteMQL(sliceFrom, sliceTo)
+        .then((d) => { allMqlDates.push(...d); })
+        .catch((err) => {
+          console.error(`[hubspot-lite] MQL slice ${sliceFrom}→${sliceTo} failed:`, err);
         }),
     ]),
   );
@@ -291,11 +300,19 @@ async function _getLeadsFunnelLiteUncached(
     .map(([date, sqlDeals]) => ({ date, sqlDeals }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
+  const mqlMap = new Map<string, number>();
+  for (const d of allMqlDates) mqlMap.set(d, (mqlMap.get(d) || 0) + 1);
+  const dailyMQLs = Array.from(mqlMap.entries())
+    .map(([date, mqls]) => ({ date, mqls }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
   return {
     dailyATM,
     dailySQLDeals,
+    dailyMQLs,
     totalATM: allAtmDates.length,
     totalSQLs: allSqlDates.length,
+    totalMQLs: allMqlDates.length,
   };
 }
 
@@ -564,6 +581,41 @@ async function _fetchLiteATM(fromDate: string, toDate: string): Promise<string[]
     after = r.paging?.next?.after;
   } while (after);
   return dates;
+}
+
+/**
+ * Lite MQL fetch. Counts contacts whose lifecyclestage = "marketingqualifiedlead"
+ * AND createdate is in [fromDate, toDate]. Strict native-HubSpot MQL count,
+ * skips the ATM-dedupe pass the full getLeadsFunnel does (which makes lite
+ * MQL ≥ pureMQL — that's fine for top-level metrics, and avoids the extra
+ * batch fetches that make full ~5–10× slower).
+ */
+async function _fetchLiteMQL(fromDate: string, toDate: string): Promise<string[]> {
+  const fromTs = new Date(fromDate + "T00:00:00Z").getTime();
+  const toTs = new Date(toDate + "T23:59:59Z").getTime();
+  const searchBody = {
+    filterGroups: [{
+      filters: [
+        { propertyName: "createdate", operator: "GTE", value: String(fromTs) },
+        { propertyName: "createdate", operator: "LTE", value: String(toTs) },
+        { propertyName: "lifecyclestage", operator: "EQ", value: "marketingqualifiedlead" },
+      ],
+    }],
+    properties: ["createdate"],
+    limit: 100,
+  };
+  const raw: any[] = [];
+  let after: string | undefined;
+  do {
+    const r = await hubspotFetch("/crm/v3/objects/contacts/search", {
+      method: "POST",
+      body: JSON.stringify({ ...searchBody, ...(after ? { after } : {}) }),
+    });
+    raw.push(...(r.results || []));
+    after = r.paging?.next?.after;
+  } while (after);
+  return Array.from(new Map(raw.map(c => [c.id, (c.properties?.createdate || "").slice(0, 10)])).values())
+    .filter(Boolean);
 }
 
 async function _fetchLiteSQL(fromDate: string, toDate: string): Promise<string[]> {
