@@ -665,11 +665,15 @@ async function _fetchLiteMQL(fromDate: string, toDate: string): Promise<{
   const seen = new Map<string, { dateStr: string; mql: boolean; src: string }>();
 
   await Promise.all(INBOUND_DATE_CANDIDATES.map(async (dateProp) => {
+    // HubSpot's native "MQL distribution" inbound chart only filters on
+    // lead_source = Inbound — it doesn't tier-scope the way the "Inbounds
+    // YTD Monthly Leads By Tier" report (which drives _fetchLiteATM) does.
+    // So we deliberately DROP the tier filter here. ATM keeps the tier
+    // filter because its source chart explicitly uses it.
     const baseFilters = [
       { propertyName: dateProp, operator: "GTE", value: String(fromTs) },
       { propertyName: dateProp, operator: "LTE", value: String(toTs) },
       { propertyName: COMPANY_LEAD_SOURCE_PROP, operator: "EQ", value: "Inbound" },
-      { propertyName: COMPANY_TIER_PROP, operator: "IN", values: COMPANY_TIER_ALLOWLIST },
     ];
     const properties = ["createdate", "hs_lifecyclestage_lead_date"];
     if (mqlProp) properties.push(mqlProp);
