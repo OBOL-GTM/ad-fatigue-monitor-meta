@@ -647,61 +647,36 @@ async function discoverMqlProperty(): Promise<string | null> {
  * createdate. Dates returned are the lead-date if present, falling back to
  * createdate.
  */
-// Resolved once per process via /crm/v3/properties/companies — finds the
-// company date property whose label matches HubSpot's "Inbound Lead"
-// X-axis. Falls back to createdate if not found. Avoids the shotgun
-// approach that fired 27+ parallel queries per WoW fetch and tripped
-// HubSpot's burst rate limit (11/sec), which silently zeroed the WoW
-// MQL count and made the Cost-per-MQL card display "-".
-let _cachedInboundDateProp: string | null = null;
-let _hasCachedInboundDateProp = false;
-async function discoverInboundLeadDateProperty(): Promise<string | null> {
-  if (_hasCachedInboundDateProp) return _cachedInboundDateProp;
-  try {
-    const r = await hubspotFetch("/crm/v3/properties/companies", { method: "GET" });
-    const props: Array<{ name: string; label?: string; type?: string }> = r.results || [];
-    const dateProps = props.filter(p => p.type === "date" || p.type === "datetime");
-    // Prefer label containing BOTH "inbound" and "lead" (matches "Inbound Lead" exactly)
-    const exact = dateProps.find(p => /inbound/i.test(p.label || "") && /lead/i.test(p.label || ""));
-    // Fall back to any date prop with "inbound" in label or name
-    const inboundish = dateProps.find(p => /inbound/i.test(p.name) || /inbound/i.test(p.label || ""));
-    const best = exact || inboundish || null;
-    _cachedInboundDateProp = best?.name || null;
-    if (best) {
-      console.log("[hubspot-lite] inbound-lead date property resolved to:", best.name, "(label:", best.label, ")");
-    } else {
-      console.warn("[hubspot-lite] no 'Inbound Lead' date property found. Date props on companies:",
-        dateProps.map(p => ({ name: p.name, label: p.label })).slice(0, 30));
-    }
-  } catch (err) {
-    console.error("[hubspot-lite] inbound-lead date discovery failed:", err);
-  }
-  _hasCachedInboundDateProp = true;
-  return _cachedInboundDateProp;
-}
+// Shotgun candidate list for "Inbound Lead - Monthly" — the date property
+// HubSpot's MQL distribution chart buckets on. Tried in parallel; properties
+// that don't exist on this portal's Companies schema error with 400 and are
+// silently skipped. Whatever exists + has values gets unioned in.
+const INBOUND_DATE_CANDIDATES = [
+  "inbound_lead",
+  "inbound_lead_date",
+  "first_inbound_lead_date",
+  "hs_inbound_lead_date",
+  "lead_qualifying_date",
+  "lead_qualification_date",
+  "became_lead_date",
+  "hs_lifecyclestage_lead_date",
+  "createdate",
+];
 
 async function _fetchLiteMQL(fromDate: string, toDate: string): Promise<{
   mqlYesDates: string[];
   totalInbounds: number;
 }> {
-  const [mqlProp, inboundDateProp] = await Promise.all([
-    discoverMqlProperty(),
-    discoverInboundLeadDateProperty(),
-  ]);
+  const mqlProp = await discoverMqlProperty();
   const fromTs = new Date(fromDate + "T00:00:00Z").getTime();
   const toTs = new Date(toDate + "T23:59:59Z").getTime();
 
-  // Use the discovered Inbound Lead date property if it exists; always also
-  // try createdate as a safety net. At most 2 parallel queries per slice
-  // instead of 9 — well under HubSpot's burst rate limit.
-  const dateCandidates = inboundDateProp
-    ? [inboundDateProp, "createdate"]
-    : ["createdate"];
-
+  // Dedup by HubSpot company id. Per-candidate counts logged so Railway logs
+  // tell us which candidate is the right one (matches HubSpot's chart total).
   const seen = new Map<string, { dateStr: string; mql: boolean; src: string }>();
   const perCandidateCount: Record<string, number> = {};
 
-  await Promise.all(dateCandidates.map(async (dateProp) => {
+  await Promise.all(INBOUND_DATE_CANDIDATES.map(async (dateProp) => {
     // HubSpot's native "MQL distribution" inbound chart only filters on
     // lead_source = Inbound — it doesn't tier-scope the way the "Inbounds
     // YTD Monthly Leads By Tier" report (which drives _fetchLiteATM) does.
