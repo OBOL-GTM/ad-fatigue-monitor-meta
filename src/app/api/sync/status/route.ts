@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 import { getSyncProgress } from "../route";
 
 export const dynamic = "force-dynamic";
@@ -11,13 +11,11 @@ export const dynamic = "force-dynamic";
  * for this user's accounts in this process, meaning nothing to report.
  */
 export async function GET(req: NextRequest) {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const allAccountIds: string[] =
-    (session as any).allAccountIds ||
-    ((session as any).accountId ? [(session as any).accountId] : []);
+  const allAccountIds: string[] = session.allAccountIds;
   if (allAccountIds.length === 0) {
     return NextResponse.json({ progress: null });
   }

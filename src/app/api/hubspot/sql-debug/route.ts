@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -32,7 +32,7 @@ async function hubspotFetch(path: string, apiKey: string, options?: RequestInit)
  * Usage: /api/hubspot/sql-debug?from=YYYY-MM-DD&to=YYYY-MM-DD
  */
 export async function GET(req: NextRequest) {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const apiKey = process.env.HUBSPOT_API_KEY;

@@ -1,19 +1,19 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { accounts, ads } from "@/lib/db/schema";
-import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const session = await auth();
+    const session = await getSessionOrPublic();
     if (!session) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const allAccountIds: string[] = (session as any).allAccountIds || [];
-    const accountId = (session as any).accountId;
+    const allAccountIds: string[] = session.allAccountIds;
+    const accountId = session.accountId;
 
     // Get all accounts in DB
     const allAccounts = await db.select().from(accounts).all();
@@ -45,7 +45,7 @@ export async function GET() {
       session: {
         accountId,
         allAccountIds,
-        accountName: (session as any).accountName,
+        accountName: session.accountId,
       },
       dbAccounts: allAccounts.map(a => ({
         id: a.id,

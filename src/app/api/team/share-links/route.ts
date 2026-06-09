@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 import { db } from "@/lib/db";
 import { shareTokens } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 /** GET: list share links (active first) */
 export async function GET() {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const tokens = await db
@@ -22,7 +22,7 @@ export async function GET() {
 
 /** POST: create a new share link */
 export async function POST(req: NextRequest) {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
 
   // 24 hex chars, URL-safe and collision-resistant enough for an internal share link.
   const token = randomBytes(12).toString("hex");
-  const createdBy = (session as any).email || null;
+  const createdBy = session.email || null;
 
   await db
     .insert(shareTokens)
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
 
 /** DELETE: revoke a share link (marks revoked_at; token becomes unusable) */
 export async function DELETE(req: NextRequest) {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const { searchParams } = new URL(req.url);

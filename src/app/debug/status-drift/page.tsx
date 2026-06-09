@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { headers, cookies } from "next/headers";
 import DriftClient from "./DriftClient";
-import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function StatusDriftPage() {
   // Logged-in users only. Public viewers should never see admin tooling.
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) redirect("/login");
 
   // Build the absolute URL for the API call from the request headers so it

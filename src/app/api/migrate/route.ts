@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { createRawDbClient } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const client = createRawDbClient();
 

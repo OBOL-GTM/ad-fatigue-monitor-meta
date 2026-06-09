@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 import { db } from "@/lib/db";
 import { accounts, ads, dailyMetrics } from "@/lib/db/schema";
 import { gte, lte, and, sql, inArray } from "drizzle-orm";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  * see exactly where the $27k-vs-$13.9k gap is coming from.
  */
 export async function GET(req: NextRequest) {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   const allAccounts = await db.select().from(accounts).all();
 
   // Session's scoped account IDs
-  const sessAccountIds: string[] = (session as any).allAccountIds || [];
+  const sessAccountIds: string[] = session.allAccountIds;
 
   // For each account, sum spend by joining ads -> dailyMetrics
   const perAccount: Array<{ accountId: string; name: string; ads: number; realSpend: number; unattributedSpend: number; total: number }> = [];
@@ -190,7 +190,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     range: { from, to },
     session: {
-      accountId: (session as any).accountId,
+      accountId: session.accountId,
       allAccountIds: sessAccountIds,
     },
     accountsInDb: allAccounts.length,

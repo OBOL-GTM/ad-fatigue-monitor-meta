@@ -36,42 +36,54 @@ export async function getSessionOrPublic(): Promise<SessionLike | null> {
     };
   }
 
-  // No real session, check the public token cookie
+  // No real session -- check public token cookie first, then fall back to
+  // open access (no login required).
   const jar = await cookies();
   const token = jar.get("public_view")?.value;
-  if (!token) return null;
 
-  const link = await db
-    .select()
-    .from(publicLinks)
-    .where(eq(publicLinks.token, token))
-    .get();
-  if (!link || link.revokedAt) return null;
+  if (token) {
+    const link = await db
+      .select()
+      .from(publicLinks)
+      .where(eq(publicLinks.token, token))
+      .get();
+    if (link && !link.revokedAt) {
+      const ownerId = link.createdBy;
+      const allRows = await db
+        .select()
+        .from(accounts)
+        .orderBy(accounts.id)
+        .all();
+      const accountRows = ownerId
+        ? allRows.filter((r) => r.userId === ownerId)
+        : allRows;
+      if (accountRows.length > 0) {
+        db.update(publicLinks)
+          .set({ viewsCount: sql`${publicLinks.viewsCount} + 1` })
+          .where(eq(publicLinks.token, token))
+          .run();
+        const ids = accountRows.map((r) => r.id);
+        return {
+          userId: `public:${token}`,
+          email: "public-viewer",
+          accountId: ids[0],
+          allAccountIds: ids,
+          isPublic: true,
+        };
+      }
+    }
+  }
 
-  // Scope public view to the accounts that belong to the user who CREATED
-  // the link. Without this, if a second user ever connects a Meta account,
-  // public viewers would see a mashup of both. Deterministic order so the
-  // "primary" account doesn't flip between requests.
-  const ownerId = link.createdBy;
+  // Open access fallback: no login required, use the first account in the DB.
   const allRows = await db
     .select()
     .from(accounts)
     .orderBy(accounts.id)
     .all();
-  const accountRows = ownerId
-    ? allRows.filter((r) => r.userId === ownerId)
-    : allRows;
-  if (accountRows.length === 0) return null;
-
-  // Best-effort: bump view counter. Non-blocking.
-  db.update(publicLinks)
-    .set({ viewsCount: sql`${publicLinks.viewsCount} + 1` })
-    .where(eq(publicLinks.token, token))
-    .run();
-
-  const ids = accountRows.map((r) => r.id);
+  if (allRows.length === 0) return null;
+  const ids = allRows.map((r) => r.id);
   return {
-    userId: `public:${token}`,
+    userId: "public:open",
     email: "public-viewer",
     accountId: ids[0],
     allAccountIds: ids,

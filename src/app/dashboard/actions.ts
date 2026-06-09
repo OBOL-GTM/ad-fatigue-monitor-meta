@@ -5,22 +5,22 @@ import { accounts } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { syncAccount } from "@/lib/meta/sync";
 import { revalidatePath } from "next/cache";
-import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 import { clearHubSpotCache } from "@/lib/hubspot/client";
 
 export async function refreshData() {
   try {
-    const session = await auth();
+    const session = await getSessionOrPublic();
     if (!session) {
       return { error: "Not authenticated. Go to /login first." };
     }
-    const providerAccountId = (session as any).accountId as string;
+    const providerAccountId = session.accountId;
     if (!providerAccountId) {
       return { error: "No account connected. Go to /login first." };
     }
 
     // Get ALL accounts for this user (they may have multiple ad accounts)
-    const allAccountIds: string[] = (session as any).allAccountIds || [providerAccountId];
+    const allAccountIds: string[] = session.allAccountIds;
     const allAccounts = await db.select().from(accounts).all();
     // Filter to accounts that belong to this user's session
     const accountsToSync = allAccounts.filter(a => allAccountIds.includes(a.id));

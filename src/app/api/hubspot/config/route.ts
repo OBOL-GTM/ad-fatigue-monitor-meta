@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 
 // Ensure table exists with all columns
 async function ensureTable() {
@@ -33,7 +33,7 @@ async function ensureTable() {
 }
 
 export async function GET() {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   await ensureTable();
   try {
@@ -61,7 +61,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     await ensureTable();

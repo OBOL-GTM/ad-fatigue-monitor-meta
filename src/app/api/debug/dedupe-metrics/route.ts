@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
 
@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
  *                    /api/debug/dedupe-metrics?apply=1   (actually delete)
  */
 export async function GET(req: Request) {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   const apply = new URL(req.url).searchParams.get("apply") === "1";
 

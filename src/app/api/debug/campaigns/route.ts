@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { ads, accounts } from "@/lib/db/schema";
 import { inArray } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 
 /**
  * Diagnostic: lists every unique campaign currently in the DB for the
@@ -14,12 +14,10 @@ import { auth } from "@/lib/auth";
  * so we can diff "in DB" vs "in Meta right now."
  */
 export async function GET() {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const allAccountIds: string[] =
-    (session as any).allAccountIds ||
-    ((session as any).accountId ? [(session as any).accountId] : []);
+  const allAccountIds: string[] = session.allAccountIds;
   if (allAccountIds.length === 0) {
     return NextResponse.json({ error: "No accounts in session" }, { status: 400 });
   }

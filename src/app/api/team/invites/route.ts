@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 import { db } from "@/lib/db";
 import { teamInvites } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
@@ -17,7 +17,7 @@ function validDomain(value: string) {
 
 /** GET: list team invites */
 export async function GET() {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const invites = await db
@@ -30,7 +30,7 @@ export async function GET() {
 
 /** POST: invite a teammate by email */
 export async function POST(req: NextRequest) {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const inviterEmail = (session as any).email || null;
+  const inviterEmail = session.email || null;
 
   await db
     .insert(teamInvites)
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
 
 /** DELETE: revoke an invite */
 export async function DELETE(req: NextRequest) {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const { searchParams } = new URL(req.url);

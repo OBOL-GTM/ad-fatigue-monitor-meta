@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/lib/db";
 import { ads, dailyMetrics } from "@/lib/db/schema";
 import { inArray, gte } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 import { getATMLeadsByCampaign } from "@/lib/hubspot/client";
 import { calculateFatigueScore } from "@/lib/fatigue/scoring";
 import { DEFAULT_SETTINGS } from "@/lib/fatigue/types";
@@ -22,11 +22,9 @@ export const maxDuration = 120;
  * POST /api/strategy/plan?range=mtd|30d|7d  (default mtd)
  */
 export async function POST(req: Request) {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const allAccountIds: string[] =
-    (session as any).allAccountIds ||
-    ((session as any).accountId ? [(session as any).accountId] : []);
+  const allAccountIds: string[] = session.allAccountIds;
   if (allAccountIds.length === 0) {
     return NextResponse.json({ error: "No accounts in session" }, { status: 400 });
   }

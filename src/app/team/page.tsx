@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { teamInvites, shareTokens, publicLinks } from "@/lib/db/schema";
@@ -9,7 +9,7 @@ import TeamClient from "./TeamClient";
 export const dynamic = "force-dynamic";
 
 export default async function TeamPage() {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) redirect("/login");
 
   const invites = await db

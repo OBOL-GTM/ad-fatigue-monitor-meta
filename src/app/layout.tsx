@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { cookies } from "next/headers";
 import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 import SidebarLayout from "@/components/SidebarLayout";
 import "./globals.css";
 
@@ -21,13 +22,11 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Public viewers arrive via /public/<token>/route.ts which sets a
-  // public_view httpOnly cookie. Real logged-in users ALWAYS take priority,
-  // even if they previously tested a public link in the same browser and the
-  // cookie is still present. Only treat as public when there is NO real auth.
-  const [session, jar] = await Promise.all([auth(), cookies()]);
-  const hasRealAuth = Boolean(session);
-  const isPublic = !hasRealAuth && Boolean(jar.get("public_view")?.value);
+  // App is open-access (no login required). Determine if user has a real
+  // auth session for UI hints (e.g. showing logout vs login button).
+  const session = await getSessionOrPublic();
+  const realAuth = await auth();
+  const isPublic = !realAuth;
 
   return (
     <html

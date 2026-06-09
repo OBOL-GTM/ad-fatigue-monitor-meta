@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { accounts } from "@/lib/db/schema";
 import { inArray } from "drizzle-orm";
 import { syncAccount, syncTodayOnly } from "@/lib/meta/sync";
-import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 import { clearHubSpotCache } from "@/lib/hubspot/client";
 import { revalidatePath } from "next/cache";
 
@@ -243,13 +243,11 @@ export async function GET(req: NextRequest) {
   }
 
   // Otherwise require a user session, sync all THEIR accounts.
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const allAccountIds: string[] =
-    (session as any).allAccountIds ||
-    ((session as any).accountId ? [(session as any).accountId] : []);
+  const allAccountIds: string[] = session.allAccountIds;
   if (allAccountIds.length === 0) {
     return NextResponse.json(
       { error: "No account connected. Please click 'Connect with Facebook' on the login page first." },

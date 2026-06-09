@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getSessionOrPublic } from "@/lib/sessionOrPublic";
 import { db } from "@/lib/db";
 import { publicLinks } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 /** GET: list public links */
 export async function GET() {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const tokens = await db
@@ -22,7 +22,7 @@ export async function GET() {
 
 /** POST: create a new public view-only link */
 export async function POST(req: NextRequest) {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
 
   // 16 bytes = 32 hex chars, longer than share_tokens since this is totally open.
   const token = randomBytes(16).toString("hex");
-  const createdBy = (session as any).email || null;
+  const createdBy = session.email || null;
 
   await db
     .insert(publicLinks)
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
 
 /** DELETE: revoke a public link */
 export async function DELETE(req: NextRequest) {
-  const session = await auth();
+  const session = await getSessionOrPublic();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
