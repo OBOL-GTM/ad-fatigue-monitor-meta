@@ -39,21 +39,34 @@ export default async function ForecastPage() {
   const ninetyDaysAgo = format(subDays(now, 89), "yyyy-MM-dd");
 
   const { verifyActiveAdStatuses, refreshAdStatusesForAccounts } = await import("@/lib/meta/statusRefresh");
-  await verifyActiveAdStatuses(allAccountIds);
-  await refreshAdStatusesForAccounts(allAccountIds);
-  const accountRows = await db.select().from(accounts).where(inArray(accounts.id, allAccountIds)).all();
-
-  const [allAdsRaw, metricsRaw, hsMTD, hsLast, liveBudget] = await Promise.all([
+  // Run status refresh + DB reads in parallel
+  const [, , accountRows, allAdsRaw, metricsRaw, hsAll] = await Promise.all([
+    verifyActiveAdStatuses(allAccountIds),
+    refreshAdStatusesForAccounts(allAccountIds),
+    db.select().from(accounts).where(inArray(accounts.id, allAccountIds)).all(),
     db.select().from(ads).where(inArray(ads.accountId, allAccountIds)).all(),
     db.select().from(dailyMetrics).where(gte(dailyMetrics.date, ninetyDaysAgo)).all(),
-    getLeadsFunnelLite(thisMonthStart, today).catch(() => null),
-    getLeadsFunnelLite(lastMonthStart, lastMonthEnd).catch(() => null),
-    getTotalBudget(accountRows.map(a => ({
-      id: a.id,
-      accessToken: a.accessToken,
-      tokenExpiresAt: a.tokenExpiresAt,
-    }))).catch(() => null),
+    // Single HubSpot call covering both MTD + last month
+    getLeadsFunnelLite(lastMonthStart, today).catch(() => null),
   ]);
+  // Slice the single result into MTD and last-month windows
+  const hsMTD = hsAll ? {
+    ...hsAll,
+    dailyATM: hsAll.dailyATM.filter(d => d.date >= thisMonthStart && d.date <= today),
+    dailySQLDeals: hsAll.dailySQLDeals.filter(d => d.date >= thisMonthStart && d.date <= today),
+    dailyMQLs: hsAll.dailyMQLs.filter(d => d.date >= thisMonthStart && d.date <= today),
+  } : null;
+  const hsLast = hsAll ? {
+    ...hsAll,
+    dailyATM: hsAll.dailyATM.filter(d => d.date >= lastMonthStart && d.date <= lastMonthEnd),
+    dailySQLDeals: hsAll.dailySQLDeals.filter(d => d.date >= lastMonthStart && d.date <= lastMonthEnd),
+    dailyMQLs: hsAll.dailyMQLs.filter(d => d.date >= lastMonthStart && d.date <= lastMonthEnd),
+  } : null;
+  const liveBudget = await getTotalBudget(accountRows.map(a => ({
+    id: a.id,
+    accessToken: a.accessToken,
+    tokenExpiresAt: a.tokenExpiresAt,
+  }))).catch(() => null);
 
   const allAdIds = new Set(allAdsRaw.map((a) => a.id));
   const scoped = metricsRaw.filter((m) => m.date <= today && allAdIds.has(m.adId));

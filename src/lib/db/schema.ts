@@ -54,6 +54,7 @@ export const dailyMetrics = sqliteTable(
   (table) => ({
     adDateIdx: uniqueIndex("daily_metrics_ad_date_idx").on(table.adId, table.date),
     adDateDescIdx: index("daily_metrics_ad_date_desc_idx").on(table.adId, table.date),
+    dateIdx: index("daily_metrics_date_idx").on(table.date),
   })
 );
 

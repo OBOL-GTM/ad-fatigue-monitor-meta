@@ -62,26 +62,34 @@ export default async function ExecutivePage({
   const weeklyFromStr = format(weeklyTrendFromDate, "yyyy-MM-dd");
   const metricsFromStr = [rangeFromStr, momFromStr, weeklyFromStr].sort()[0];
 
-  const [allAds, metricsRaw, hubspotResult, hubspotMoM, hubspotWoW] = await Promise.all([
+  // Single HubSpot call covering the widest date range needed (WoW window
+  // goes back 13 weeks, which covers MoM and the selected range too).
+  // Slicing the result client-side avoids 2 extra HubSpot round-trips.
+  const todayStr = format(now, "yyyy-MM-dd");
+  const [allAds, metricsRaw, hubspotAll] = await Promise.all([
     db.select().from(ads).where(inArray(ads.accountId, allAccountIds)).all(),
     db.select().from(dailyMetrics).where(gte(dailyMetrics.date, metricsFromStr)).all(),
-    getLeadsFunnelLite(rangeFromStr, rangeToStr).catch(err => {
+    getLeadsFunnelLite(metricsFromStr, todayStr).catch(err => {
       console.error("[executive] HubSpot fetch failed:", err);
       return null;
     }),
-    // Separate HubSpot query for MoM so this-month/last-month stats are always
-    // available, even when user selected e.g. "Last month" (which would
-    // otherwise drop April from the main hubspotResult).
-    getLeadsFunnelLite(momFromStr, format(now, "yyyy-MM-dd")).catch(err => {
-      console.error("[executive] HubSpot MoM fetch failed:", err);
-      return null;
-    }),
-    // Separate HubSpot query for WoW + 8-week trend, always anchored on today.
-    getLeadsFunnelLite(weeklyFromStr, format(now, "yyyy-MM-dd")).catch(err => {
-      console.error("[executive] HubSpot WoW fetch failed:", err);
-      return null;
-    }),
   ]);
+  // Slice the single HubSpot result into the 3 windows we need.
+  const sliceHubspot = (data: typeof hubspotAll, from: string, to: string) => {
+    if (!data) return null;
+    return {
+      dailyATM: data.dailyATM.filter(d => d.date >= from && d.date <= to),
+      dailySQLDeals: data.dailySQLDeals.filter(d => d.date >= from && d.date <= to),
+      dailyMQLs: data.dailyMQLs.filter(d => d.date >= from && d.date <= to),
+      totalATM: data.dailyATM.filter(d => d.date >= from && d.date <= to).reduce((s, d) => s + d.atm, 0),
+      totalSQLs: data.dailySQLDeals.filter(d => d.date >= from && d.date <= to).reduce((s, d) => s + d.sqlDeals, 0),
+      totalMQLs: data.dailyMQLs.filter(d => d.date >= from && d.date <= to).reduce((s, d) => s + d.mqls, 0),
+      totalInbounds: 0,
+    };
+  };
+  const hubspotResult = sliceHubspot(hubspotAll, rangeFromStr, rangeToStr);
+  const hubspotMoM = sliceHubspot(hubspotAll, momFromStr, todayStr);
+  const hubspotWoW = sliceHubspot(hubspotAll, weeklyFromStr, todayStr);
   // Filter metrics to this owner's ads (including synthetic __unattributed_*
   // reconciliation rows, which the sync creates with accountId set to the
   // owner's account so they ARE in allAds). Dropping the filter would pull in

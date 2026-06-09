@@ -6,7 +6,7 @@ const BASE_URL = "https://api.hubapi.com";
 // Lightweight in-memory TTL cache so repeat page loads/preset switching don't
 // trigger new HubSpot queries. Node process is persistent on Railway so this
 // speeds things up across users too.
-const HUBSPOT_CACHE_TTL_MS = 3 * 60 * 1000; // 3 minutes
+const HUBSPOT_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 type CacheEntry = { expires: number; promise: Promise<any> };
 const _hsCache = new Map<string, CacheEntry>();
 
@@ -118,7 +118,7 @@ async function getApiKey(): Promise<string> {
 // whether parallel slices, shotgun candidates, or pagination — serialize
 // through this one rate slot. For a 33-query WoW window, ~3.6 sec total
 // vs ~1 sec under semaphore-only, but deterministic and reliable.
-const HS_MIN_GAP_MS = 110;
+const HS_MIN_GAP_MS = 105;
 let _hsNextSlotTime = 0;
 
 async function _waitForRateSlot(): Promise<void> {

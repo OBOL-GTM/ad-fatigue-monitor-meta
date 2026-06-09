@@ -75,9 +75,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   // verify runs first because it's both faster AND more reliable for the
   // common case (only 50-200 ACTIVE ads to check, not 20k).
   const { verifyActiveAdStatuses, refreshAdStatusesForAccounts } = await import("@/lib/meta/statusRefresh");
-  await verifyActiveAdStatuses(allAccountIds);
-  await refreshAdStatusesForAccounts(allAccountIds);
-  const allAdsRaw = await db.select().from(ads).where(inArray(ads.accountId, allAccountIds)).all();
+  const [, , allAdsRaw] = await Promise.all([
+    verifyActiveAdStatuses(allAccountIds),
+    refreshAdStatusesForAccounts(allAccountIds),
+    db.select().from(ads).where(inArray(ads.accountId, allAccountIds)).all(),
+  ]);
   const allAds = allAdsRaw.filter(a => a.status === "ACTIVE" && !a.id.startsWith("__unattributed_"));
 
   const rangeStart = isCustom ? customFrom : format(subDays(now, rangeDays), "yyyy-MM-dd");

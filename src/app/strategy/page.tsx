@@ -57,11 +57,12 @@ export default async function StrategyPage({
   // ads don't show as ACTIVE (limited to 1 hit per account per minute, and
   // only when the freshest lastSyncedAt is > 5 min old).
   const { verifyActiveAdStatuses, refreshAdStatusesForAccounts } = await import("@/lib/meta/statusRefresh");
-  await verifyActiveAdStatuses(allAccountIds);
-  await refreshAdStatusesForAccounts(allAccountIds);
-  // Fetch ALL ads (needed for range-scoped spend totals that include paused /
-  // archived / unattributed rows, matches Dashboard accuracy).
-  const allAdsRaw = await db.select().from(ads).where(inArray(ads.accountId, allAccountIds)).all();
+  // Run status refresh + DB reads in parallel instead of sequential
+  const [, , allAdsRaw] = await Promise.all([
+    verifyActiveAdStatuses(allAccountIds),
+    refreshAdStatusesForAccounts(allAccountIds),
+    db.select().from(ads).where(inArray(ads.accountId, allAccountIds)).all(),
+  ]);
   // ACTIVE-only ad summaries for the per-ad detail cards.
   const allAds = allAdsRaw.filter(a => a.status === "ACTIVE" && !a.id.startsWith("__unattributed_"));
 
