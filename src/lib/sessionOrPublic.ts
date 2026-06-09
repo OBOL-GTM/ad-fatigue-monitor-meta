@@ -38,55 +38,68 @@ export async function getSessionOrPublic(): Promise<SessionLike | null> {
 
   // No real session -- check public token cookie first, then fall back to
   // open access (no login required).
-  const jar = await cookies();
-  const token = jar.get("public_view")?.value;
+  try {
+    const jar = await cookies();
+    const token = jar.get("public_view")?.value;
 
-  if (token) {
-    const link = await db
-      .select()
-      .from(publicLinks)
-      .where(eq(publicLinks.token, token))
-      .get();
-    if (link && !link.revokedAt) {
-      const ownerId = link.createdBy;
-      const allRows = await db
+    if (token) {
+      const link = await db
         .select()
-        .from(accounts)
-        .orderBy(accounts.id)
-        .all();
-      const accountRows = ownerId
-        ? allRows.filter((r) => r.userId === ownerId)
-        : allRows;
-      if (accountRows.length > 0) {
-        db.update(publicLinks)
-          .set({ viewsCount: sql`${publicLinks.viewsCount} + 1` })
-          .where(eq(publicLinks.token, token))
-          .run();
-        const ids = accountRows.map((r) => r.id);
-        return {
-          userId: `public:${token}`,
-          email: "public-viewer",
-          accountId: ids[0],
-          allAccountIds: ids,
-          isPublic: true,
-        };
+        .from(publicLinks)
+        .where(eq(publicLinks.token, token))
+        .get();
+      if (link && !link.revokedAt) {
+        const ownerId = link.createdBy;
+        const tokenRows = await db
+          .select()
+          .from(accounts)
+          .orderBy(accounts.id)
+          .all();
+        const accountRows = ownerId
+          ? tokenRows.filter((r) => r.userId === ownerId)
+          : tokenRows;
+        if (accountRows.length > 0) {
+          db.update(publicLinks)
+            .set({ viewsCount: sql`${publicLinks.viewsCount} + 1` })
+            .where(eq(publicLinks.token, token))
+            .run();
+          const ids = accountRows.map((r) => r.id);
+          return {
+            userId: `public:${token}`,
+            email: "public-viewer",
+            accountId: ids[0],
+            allAccountIds: ids,
+            isPublic: true,
+          };
+        }
       }
     }
+  } catch (err) {
+    console.error("[sessionOrPublic] cookie check failed:", err);
   }
 
   // Open access fallback: no login required, use the first account in the DB.
-  const allRows = await db
-    .select()
-    .from(accounts)
-    .orderBy(accounts.id)
-    .all();
-  if (allRows.length === 0) return null;
-  const ids = allRows.map((r) => r.id);
-  return {
-    userId: "public:open",
-    email: "public-viewer",
-    accountId: ids[0],
-    allAccountIds: ids,
-    isPublic: true,
-  };
+  try {
+    const allRows = await db
+      .select()
+      .from(accounts)
+      .orderBy(accounts.id)
+      .all();
+    if (allRows.length === 0) {
+      console.log("[sessionOrPublic] No accounts in DB, returning null");
+      return null;
+    }
+    const ids = allRows.map((r) => r.id);
+    console.log("[sessionOrPublic] Open access fallback, using account:", ids[0]);
+    return {
+      userId: "public:open",
+      email: "public-viewer",
+      accountId: ids[0],
+      allAccountIds: ids,
+      isPublic: true,
+    };
+  } catch (err) {
+    console.error("[sessionOrPublic] DB fallback failed:", err);
+    return null;
+  }
 }
